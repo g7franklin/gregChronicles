@@ -1,0 +1,29 @@
+{
+  "name": "life-newsletter",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm run --parallel dev",
+    "dev:api": "pnpm --filter api run dev",
+    "dev:admin": "pnpm --filter admin-web run dev",
+    "dev:public": "pnpm --filter public-web run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "deploy:api": "cd infra && ./deploy-api.sh",
+    "deploy:admin": "cd infra && ./deploy-admin.sh",
+    "deploy:public": "cd infra && ./deploy-public.sh"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "dependencies": {
+    "0g": "^0.4.2",
+    "firebase": "^12.9.0",
+    "pnpm": "^10.30.1"
+  }
+}

@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Env (secrets – do not commit)
+.env
+.env.local
+.env.*.local
+
+# Next.js
+.next/
+out/
+
+# Build / misc
+dist/
+build/
+*.log
+.DS_Store
