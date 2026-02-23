@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
 import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
 import { logger } from '../lib/logger.js';

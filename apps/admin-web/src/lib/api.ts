@@ -50,7 +50,23 @@ export async function apiPostFormData(path: string, formData: FormData): Promise
     headers,
     body: formData,
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    try {
+      const body = JSON.parse(text) as { error?: string; details?: string };
+      const msg = body.details ? `${body.error ?? 'Error'}: ${body.details}` : body.error ?? text;
+      throw new Error(msg);
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        const generic = /Internal Server Error|Bad Gateway|ECONNREFUSED/i.test(text)
+          ? `${text} — Is the API running at http://localhost:8080? Check the API terminal for the real error.`
+          : text;
+        throw new Error(generic);
+      }
+      if (e instanceof Error) throw e;
+      throw new Error(text);
+    }
+  }
   return res.json();
 }
 

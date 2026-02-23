@@ -119,7 +119,11 @@ router.post(
       res.status(201).json(toJsonMemo(memoId, doc as Record<string, unknown>));
     } catch (err) {
       logger.error('POST /admin/memos', err);
-      res.status(500).json({ error: 'Failed to create memo' });
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({
+        error: 'Failed to create memo',
+        ...(process.env.NODE_ENV !== 'production' && { details: message }),
+      });
     }
   }
 );

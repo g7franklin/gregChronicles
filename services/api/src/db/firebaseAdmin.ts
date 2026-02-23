@@ -1,4 +1,4 @@
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
 import { getProjectId } from '../config.js';
 
 let initialized = false;

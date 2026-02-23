@@ -1,12 +1,13 @@
 import { Firestore } from '@google-cloud/firestore';
-import { getProjectId } from '../config.js';
+import { getProjectId, getFirestoreDatabaseId } from '../config.js';
 
 let firestore: Firestore | null = null;
 
 export function getFirestore(): Firestore {
   if (!firestore) {
     const projectId = getProjectId();
-    firestore = new Firestore({ projectId });
+    const databaseId = getFirestoreDatabaseId();
+    firestore = new Firestore({ projectId, ...(databaseId && { databaseId }) });
   }
   return firestore;
 }
