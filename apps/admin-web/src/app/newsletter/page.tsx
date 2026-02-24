@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { getAuth } from '@/lib/firebase';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
@@ -35,6 +35,16 @@ export default function NewsletterPage() {
   const [sendNowLoading, setSendNowLoading] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
+  const [editMode, setEditMode] = useState<'visual' | 'source'>('visual');
+  const [editorVersion, setEditorVersion] = useState(0);
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  const getBodyMarkdown = useCallback(() => {
+    if (editMode === 'visual' && editorRef.current) {
+      return editorRef.current.innerHTML;
+    }
+    return bodyMarkdown;
+  }, [editMode, bodyMarkdown]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -82,6 +92,7 @@ export default function NewsletterPage() {
       setSubject(draft.subject ?? '');
       setBodyMarkdown(draft.bodyMarkdown ?? '');
       loadPreviewBody(draft.id);
+      setEditorVersion(v => v + 1);
     }
   }, [draft?.id]);
 
@@ -131,7 +142,8 @@ export default function NewsletterPage() {
     setSaving(true);
     setMessage(null);
     try {
-      await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown });
+      const currentBody = getBodyMarkdown();
+      await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
       setMessage('Saved.');
       const updated = await apiGet<Draft>(`/admin/drafts/${draft.id}`);
       setDraft(updated);
@@ -139,6 +151,7 @@ export default function NewsletterPage() {
       setBodyMarkdown(updated.bodyMarkdown ?? '');
       setPreviewBodyMarkdown(null);
       loadPreviewBody(updated.id);
+      setEditorVersion(v => v + 1);
     } catch (e) {
       setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -151,12 +164,15 @@ export default function NewsletterPage() {
     setSaving(true);
     setMessage(null);
     try {
+      const currentBody = getBodyMarkdown();
+      await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
       await apiPost(`/admin/drafts/${draft.id}/approve`);
       setMessage('Marked ready for Sunday. It will be sent Sunday at 6 AM.');
       const updated = await apiGet<Draft>(`/admin/drafts/${draft.id}`);
       setDraft(updated);
       setSubject(updated.subject ?? '');
       setBodyMarkdown(updated.bodyMarkdown ?? '');
+      setEditorVersion(v => v + 1);
     } catch (e) {
       setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -187,11 +203,14 @@ export default function NewsletterPage() {
     setChatLoading(true);
     setMessage(null);
     try {
+      const currentBody = getBodyMarkdown();
+      await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
       const result = await apiPost(`/admin/drafts/${draft.id}/chat`, {
         message: chatMessage.trim(),
       }) as { subject: string; bodyMarkdown: string };
       setSubject(result.subject);
       setBodyMarkdown(result.bodyMarkdown);
+      setEditorVersion(v => v + 1);
       setChatMessage('');
       setMessage('Draft updated. You can edit further or ask again.');
     } catch (e) {
@@ -351,50 +370,136 @@ export default function NewsletterPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Body (Markdown / HTML)
-                </label>
-                <textarea
-                  value={bodyMarkdown}
-                  onChange={(e) => setBodyMarkdown(e.target.value)}
-                  rows={16}
-                  className="w-full border rounded-lg p-2 font-mono text-sm"
-                />
-              </div>
-
-              <div className="border border-slate-200 rounded-lg p-4 bg-white">
-                <h2 className="text-lg font-medium text-slate-800 mb-2">Preview (what viewers will see)</h2>
-                <p className="text-sm text-slate-500 mb-3">Subject: {subject || '(none)'}</p>
-                <div
-                  className="p-8 bg-[#fafaf8] border border-stone-300 max-h-[70vh] overflow-auto"
-                  style={{
-                    fontFamily: 'Georgia, "Times New Roman", serif',
-                    boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.08)',
-                  }}
-                >
-                  {(previewBodyMarkdown ?? bodyMarkdown) ? (
-                    (() => {
-                      const raw = previewBodyMarkdown ?? bodyMarkdown;
-                      const isHtml = /^\s*</.test(raw) || raw.includes('<div') || raw.includes('<p') || raw.includes('<table');
-                      if (!isHtml) {
-                        return (
-                          <pre className="whitespace-pre-wrap font-sans text-stone-700 text-sm">
-                            {raw}
-                          </pre>
-                        );
-                      }
-                      const html = sanitizeVideoHtml(raw);
-                      return (
-                        <div
-                          className="newspaper-content max-w-[600px] mx-auto [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"
-                          dangerouslySetInnerHTML={{ __html: html }}
-                        />
-                      );
-                    })()
-                  ) : (
-                    <p className="text-stone-500">No content yet.</p>
-                  )}
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-700">Body</label>
+                  <div className="flex bg-slate-100 rounded-lg p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editMode === 'source') {
+                          setEditorVersion(v => v + 1);
+                          setEditMode('visual');
+                        }
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                        editMode === 'visual'
+                          ? 'bg-white shadow-sm text-slate-800 font-medium'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      Visual Editor
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editMode === 'visual' && editorRef.current) {
+                          setBodyMarkdown(editorRef.current.innerHTML);
+                        }
+                        setEditMode('source');
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                        editMode === 'source'
+                          ? 'bg-white shadow-sm text-slate-800 font-medium'
+                          : 'text-slate-500 hover:text-slate-700'
+                      }`}
+                    >
+                      Source HTML
+                    </button>
+                  </div>
                 </div>
+
+                {editMode === 'visual' ? (
+                  <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                    <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                      </svg>
+                      <span className="text-sm text-slate-500">Click anywhere on the newsletter to edit text directly</span>
+                    </div>
+                    <div
+                      className="p-8 bg-[#fafaf8] max-h-[70vh] overflow-auto"
+                      style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
+                    >
+                      {bodyMarkdown ? (
+                        (() => {
+                          const isHtml = /^\s*</.test(bodyMarkdown) || bodyMarkdown.includes('<div') || bodyMarkdown.includes('<p') || bodyMarkdown.includes('<table');
+                          const content = isHtml
+                            ? sanitizeVideoHtml(bodyMarkdown)
+                            : `<div style="white-space:pre-wrap;font-family:sans-serif;color:#44403c;font-size:0.875rem">${bodyMarkdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+                          return (
+                            <div
+                              key={editorVersion}
+                              ref={editorRef}
+                              contentEditable
+                              suppressContentEditableWarning
+                              className="newspaper-content max-w-[600px] mx-auto [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900 focus:outline-none cursor-text [&_*]:cursor-text"
+                              dangerouslySetInnerHTML={{ __html: content }}
+                              onClick={(e) => {
+                                const target = e.target as HTMLElement;
+                                if (target.tagName === 'A' || target.closest('a')) {
+                                  e.preventDefault();
+                                }
+                              }}
+                            />
+                          );
+                        })()
+                      ) : (
+                        <div
+                          key={editorVersion}
+                          ref={editorRef}
+                          contentEditable
+                          suppressContentEditableWarning
+                          className="newspaper-content max-w-[600px] mx-auto focus:outline-none cursor-text min-h-[200px] text-stone-400"
+                        >
+                          <p>Start typing your newsletter content...</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <textarea
+                      value={bodyMarkdown}
+                      onChange={(e) => setBodyMarkdown(e.target.value)}
+                      rows={16}
+                      className="w-full border rounded-lg p-2 font-mono text-sm"
+                    />
+                    <div className="border border-slate-200 rounded-lg p-4 bg-white mt-4">
+                      <h2 className="text-lg font-medium text-slate-800 mb-2">Preview</h2>
+                      <p className="text-sm text-slate-500 mb-3">Subject: {subject || '(none)'}</p>
+                      <div
+                        className="p-8 bg-[#fafaf8] border border-stone-300 max-h-[70vh] overflow-auto"
+                        style={{
+                          fontFamily: 'Georgia, "Times New Roman", serif',
+                          boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.08)',
+                        }}
+                      >
+                        {(previewBodyMarkdown ?? bodyMarkdown) ? (
+                          (() => {
+                            const raw = previewBodyMarkdown ?? bodyMarkdown;
+                            const isHtml = /^\s*</.test(raw) || raw.includes('<div') || raw.includes('<p') || raw.includes('<table');
+                            if (!isHtml) {
+                              return (
+                                <pre className="whitespace-pre-wrap font-sans text-stone-700 text-sm">
+                                  {raw}
+                                </pre>
+                              );
+                            }
+                            const html = sanitizeVideoHtml(raw);
+                            return (
+                              <div
+                                className="newspaper-content max-w-[600px] mx-auto [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"
+                                dangerouslySetInnerHTML={{ __html: html }}
+                              />
+                            );
+                          })()
+                        ) : (
+                          <p className="text-stone-500">No content yet.</p>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
