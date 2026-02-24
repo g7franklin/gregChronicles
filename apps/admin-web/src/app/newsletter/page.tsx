@@ -99,8 +99,9 @@ export default function NewsletterPage() {
   /**
    * Sanitize video tags in HTML before rendering:
    * - Remove autoplay/loop/muted so videos don't load or play until clicked
-   * - Add controls, playsinline, preload="metadata"
-   * Done as string transform so the browser never sees autoplay attributes.
+   * - Add controls, playsinline, preload="none"
+   * An IntersectionObserver later upgrades preload to "metadata" when the
+   * video scrolls into view, so the first frame shows without blocking page load.
    */
   function sanitizeVideoHtml(html: string): string {
     return html.replace(/<video\b([^>]*)>/gi, (_match, attrs: string) => {
@@ -109,10 +110,31 @@ export default function NewsletterPage() {
         .replace(/\s*preload=["'][^"']*["']/gi, '');
       if (!/controls/i.test(cleaned)) cleaned += ' controls';
       if (!/playsinline/i.test(cleaned)) cleaned += ' playsinline';
-      cleaned += ' preload="metadata"';
+      cleaned += ' preload="none"';
       return `<video${cleaned}>`;
     });
   }
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            (entry.target as HTMLVideoElement).preload = 'metadata';
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { rootMargin: '200px' },
+    );
+
+    const container = document.querySelector('.max-w-4xl');
+    if (container) {
+      container.querySelectorAll('video[preload="none"]').forEach((v) => observer.observe(v));
+    }
+
+    return () => observer.disconnect();
+  }, [bodyMarkdown, previewBodyMarkdown, editorVersion, editMode]);
 
   const generateDraft = async () => {
     setGenerating(true);
