@@ -35,6 +35,17 @@ export function getSevenDaysAgo(date: Date): Date {
 }
 
 /**
+ * Returns the most recent Sunday at 00:00:00 (start of the current week).
+ * If today IS Sunday, returns today at midnight.
+ */
+export function getMostRecentSunday(date: Date): Date {
+  const d = new Date(date);
+  d.setDate(d.getDate() - d.getDay());
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
  * Returns the Sunday of the given ISO week (e.g. "2026-W08").
  * Used for "planned send date" — newsletter sends Sunday at 6 AM for that week.
  */

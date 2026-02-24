@@ -1,6 +1,6 @@
 import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
-import { getWeekKey, getSevenDaysAgo, getSundayOfWeekKey } from '../lib/weekKey.js';
+import { getWeekKey, getMostRecentSunday, getSundayOfWeekKey } from '../lib/weekKey.js';
 import { renderUserPrompt, type PromptContext } from '../lib/promptTemplate.js';
 import { getApiBaseUrl } from '../config.js';
 import { generateNewsletterDraft } from '../llm/grokClient.js';
@@ -26,7 +26,7 @@ export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
   const db = getFirestore();
   const now = new Date();
   const weekKey = getWeekKey(now);
-  const startDate = getSevenDaysAgo(now);
+  const startDate = getMostRecentSunday(now);
 
   const activePromptSnap = await db
     .collection(COLLECTIONS.PROMPT_VERSIONS)
@@ -123,6 +123,27 @@ export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
   }
   // Always use send date for subject (no "Week of" range)
   const subject = sendDate ? `The Greg Chronicle — ${sendDate}` : 'The Greg Chronicle — Weekly Update';
+
+  const approvedSnap = await db
+    .collection(COLLECTIONS.DRAFTS)
+    .where('weekKey', '==', weekKey)
+    .where('status', '==', 'approved')
+    .get()
+    .catch(async () => {
+      const all = await db.collection(COLLECTIONS.DRAFTS).where('weekKey', '==', weekKey).get();
+      return { docs: all.docs.filter((d) => d.data().status === 'approved') };
+    });
+  if (approvedSnap.docs.length > 0) {
+    const batch = db.batch();
+    for (const doc of approvedSnap.docs) {
+      batch.update(doc.ref, { status: 'pending_approval', approvedAt: null });
+    }
+    await batch.commit();
+    logger.info('Reverted approved drafts to pending_approval', {
+      weekKey,
+      count: approvedSnap.docs.length,
+    });
+  }
 
   const draftRef = await db.collection(COLLECTIONS.DRAFTS).add({
     weekKey,

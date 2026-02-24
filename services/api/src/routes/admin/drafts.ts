@@ -179,7 +179,8 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
 
 router.post('/:id/approve', async (req: AuthRequest, res: Response) => {
   try {
-    const ref = getFirestore().collection(COLLECTIONS.DRAFTS).doc(req.params.id);
+    const db = getFirestore();
+    const ref = db.collection(COLLECTIONS.DRAFTS).doc(req.params.id);
     const snap = await ref.get();
     if (!snap.exists) {
       res.status(404).json({ error: 'Draft not found' });
@@ -190,6 +191,27 @@ router.post('/:id/approve', async (req: AuthRequest, res: Response) => {
       res.status(400).json({ error: 'Draft already sent' });
       return;
     }
+
+    const weekKey = data.weekKey as string;
+    if (weekKey) {
+      const otherApproved = await db
+        .collection(COLLECTIONS.DRAFTS)
+        .where('weekKey', '==', weekKey)
+        .where('status', '==', 'approved')
+        .get()
+        .catch(async () => {
+          const all = await db.collection(COLLECTIONS.DRAFTS).where('weekKey', '==', weekKey).get();
+          return { docs: all.docs.filter((d) => d.data().status === 'approved') };
+        });
+      const batch = db.batch();
+      for (const doc of otherApproved.docs) {
+        if (doc.id !== req.params.id) {
+          batch.update(doc.ref, { status: 'pending_approval', approvedAt: null });
+        }
+      }
+      await batch.commit();
+    }
+
     await ref.update({ status: 'approved', approvedAt: new Date() });
     const updated = await ref.get();
     res.json({ id: updated.id, ...updated.data() });
