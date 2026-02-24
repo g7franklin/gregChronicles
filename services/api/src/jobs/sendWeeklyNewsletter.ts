@@ -94,8 +94,14 @@ export async function sendDraftById(
           subject: draft.subject ?? 'Weekly Newsletter',
           html: bodyHtml + `<p><a href="${archiveUrl}">View in browser</a></p><p><a href="${unsubUrl}">Unsubscribe</a></p>`,
         });
-      } catch (err) {
-        logger.error('SendGrid send failed', err, { email });
+        logger.info('SendGrid email sent successfully', { email });
+      } catch (err: unknown) {
+        const sgErr = err as { response?: { body?: unknown; statusCode?: number } };
+        logger.error('SendGrid send failed', err, {
+          email,
+          statusCode: sgErr.response?.statusCode,
+          responseBody: sgErr.response?.body,
+        });
       }
     }
   }
