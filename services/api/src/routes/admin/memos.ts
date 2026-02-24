@@ -1,4 +1,5 @@
-import { Router, Response } from 'express';
+import { createRequire } from 'module';
+import { Router, type IRouter, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { Timestamp } from '@google-cloud/firestore';
@@ -9,7 +10,25 @@ import { getWeekKey } from '../../lib/weekKey.js';
 import { AuthRequest } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
 
-const router = Router();
+const require = createRequire(import.meta.url);
+const heicConvert = require('heic-convert') as (opts: {
+  buffer: Buffer;
+  format: 'JPEG' | 'PNG';
+  quality?: number;
+}) => Promise<Buffer>;
+
+function isHeicOrHeif(file: { mimetype: string; originalname: string }): boolean {
+  const m = (file.mimetype || '').toLowerCase();
+  const name = (file.originalname || '').toLowerCase();
+  return (
+    m === 'image/heic' ||
+    m === 'image/heif' ||
+    name.endsWith('.heic') ||
+    name.endsWith('.heif')
+  );
+}
+
+const router: IRouter = Router();
 
 function toJsonMemo(id: string, data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { id, ...data };
@@ -65,7 +84,7 @@ router.post(
 
       const attachmentsList: Array<{
         id: string;
-        type: 'audio' | 'video';
+        type: 'audio' | 'video' | 'image';
         originalName: string;
         gcsPath: string;
         contentType: string;
@@ -76,32 +95,76 @@ router.post(
 
       const allowedAudio = ['audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/mp4'];
       const allowedVideo = ['video/mp4', 'video/quicktime', 'video/webm'];
+      const allowedImage = [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'image/gif',
+        'image/heic',
+        'image/heif',
+      ];
 
-      const processFile = async (file: Express.Multer.File, suffix: string): Promise<void> => {
+      const processFile = async (file: Express.Multer.File): Promise<void> => {
         const contentType = file.mimetype;
-        const isAudio = allowedAudio.includes(contentType) || contentType.startsWith('audio/');
         const isVideo = allowedVideo.includes(contentType) || contentType.startsWith('video/');
-        const type = isVideo ? 'video' : 'audio';
-        const ext = type === 'video' ? (contentType.includes('quicktime') ? 'mov' : 'mp4') : 'mp3';
+        const isImage =
+          allowedImage.includes(contentType) ||
+          contentType.startsWith('image/') ||
+          isHeicOrHeif(file);
+        const isAudio = allowedAudio.includes(contentType) || contentType.startsWith('audio/');
+        let type: 'audio' | 'video' | 'image' = 'audio';
+        let ext = 'mp3';
+        let buffer = file.buffer;
+        let finalContentType = contentType;
+        if (isVideo) {
+          type = 'video';
+          ext = contentType.includes('quicktime') ? 'mov' : 'mp4';
+        } else if (isImage) {
+          type = 'image';
+          if (isHeicOrHeif(file)) {
+            try {
+              buffer = await heicConvert({
+                buffer: file.buffer,
+                format: 'JPEG',
+                quality: 0.92,
+              });
+              finalContentType = 'image/jpeg';
+              ext = 'jpg';
+            } catch (err) {
+              logger.warn('HEIC conversion failed, storing original', {
+                error: err instanceof Error ? err.message : String(err),
+              });
+              ext = contentType.includes('heic') || contentType.includes('heif') ? 'heic' : 'jpg';
+            }
+          } else {
+            if (contentType.includes('png')) ext = 'png';
+            else if (contentType.includes('webp')) ext = 'webp';
+            else if (contentType.includes('gif')) ext = 'gif';
+            else ext = 'jpg';
+          }
+        } else if (isAudio) {
+          type = 'audio';
+          ext = 'mp3';
+        }
         const attId = getFirestore().collection(COLLECTIONS.MEMOS).doc().id;
         const gcsPath = `memos/${memoId}/${attId}.${ext}`;
-        await uploadBuffer(gcsPath, file.buffer, contentType);
+        await uploadBuffer(gcsPath, buffer, finalContentType);
         attachmentsList.push({
           id: attId,
           type,
           originalName: file.originalname,
           gcsPath,
-          contentType,
-          sizeBytes: file.size,
+          contentType: finalContentType,
+          sizeBytes: buffer.length,
           createdAt: Timestamp.fromDate(now),
         });
       };
 
       if (recorded) {
-        await processFile(recorded, 'recorded');
+        await processFile(recorded);
       }
       for (const f of attachments) {
-        await processFile(f, 'att');
+        await processFile(f);
       }
 
       const doc = {

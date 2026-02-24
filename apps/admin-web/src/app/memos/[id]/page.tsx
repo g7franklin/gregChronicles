@@ -97,6 +97,13 @@ export default function MemoDetailPage() {
                       {a.type === 'video' && (
                         <video controls src={signedUrls[a.id]} className="mt-2 w-full max-w-md" />
                       )}
+                      {a.type === 'image' && (
+                        <img
+                          src={signedUrls[a.id]}
+                          alt={a.originalName}
+                          className="mt-2 max-w-full h-auto max-h-96 rounded object-contain"
+                        />
+                      )}
                       <a
                         href={signedUrls[a.id]}
                         target="_blank"

@@ -84,13 +84,9 @@ export default function CapturePage() {
 
   const addFiles = useCallback((files: FileList | null) => {
     if (!files) return;
-    const allowed = [
-      'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/mp4',
-      'video/mp4', 'video/quicktime', 'video/webm',
-    ];
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
-      if (allowed.some((t) => f.type.startsWith(t.split('/')[0])) || allowed.includes(f.type)) {
+      if (f.type.startsWith('image/') || f.type.startsWith('audio/') || f.type.startsWith('video/')) {
         setAttachments((prev) => [...prev, { file: f, id: Math.random().toString(36).slice(2) }]);
       }
     }
@@ -190,7 +186,7 @@ export default function CapturePage() {
               <p className="mb-2">Drag and drop audio/video here, or click to select</p>
               <input
                 type="file"
-                accept="audio/*,video/mp4,video/quicktime,video/webm"
+                accept="image/*,.heic,.heif,audio/*,video/mp4,video/quicktime,video/webm"
                 multiple
                 className="hidden"
                 id="file-upload"

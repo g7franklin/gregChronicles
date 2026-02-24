@@ -33,3 +33,22 @@ export function getSevenDaysAgo(date: Date): Date {
   d.setHours(0, 0, 0, 0);
   return d;
 }
+
+/**
+ * Returns the Sunday of the given ISO week (e.g. "2026-W08").
+ * Used for "planned send date" — newsletter sends Sunday at 6 AM for that week.
+ */
+export function getSundayOfWeekKey(weekKey: string): Date | null {
+  const match = /^(\d{4})-W(\d{2})$/.exec(weekKey);
+  if (!match) return null;
+  const year = parseInt(match[1], 10);
+  const week = parseInt(match[2], 10);
+  const jan4 = new Date(year, 0, 4);
+  const dayOfWeek = jan4.getDay();
+  const mondayWeek1Offset = (dayOfWeek + 6) % 7;
+  const mondayWeek1 = new Date(year, 0, 4 - mondayWeek1Offset);
+  const sunday = new Date(mondayWeek1);
+  sunday.setDate(sunday.getDate() + (week - 1) * 7 + 6);
+  sunday.setHours(6, 0, 0, 0);
+  return sunday;
+}

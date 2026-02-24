@@ -72,7 +72,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
   try {
     res.status(500).json({
       error: 'Internal Server Error',
-      ...(process.env.NODE_ENV !== 'production' && { details: message }),
+      details: message,
     });
   } catch (e) {
     logger.error('Error handler failed', e);

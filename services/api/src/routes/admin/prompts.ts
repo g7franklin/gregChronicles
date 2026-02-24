@@ -265,6 +265,7 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
     }
     const userPrompt = renderUserPrompt(DEFAULT_USER_PROMPT_TEMPLATE, {
       weekRange: '2026-02-15 to 2026-02-22',
+      sendDate: 'Sunday, February 23, 2026',
       memosJson: FAKE_MEMOS_JSON,
       contextNewslettersJson: FAKE_NEWSLETTERS_JSON,
       styleGuidelines: '',

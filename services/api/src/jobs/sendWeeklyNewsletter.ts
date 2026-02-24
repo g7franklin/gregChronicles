@@ -1,5 +1,6 @@
 import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
+import type { Firestore } from '@google-cloud/firestore';
 import { logger } from '../lib/logger.js';
 import { getApiBaseUrl } from '../config.js';
 import { createUnsubscribeToken } from '../lib/unsubscribeToken.js';
@@ -28,28 +29,23 @@ function slugify(str: string): string {
     .replace(/^-|-$/g, '');
 }
 
-export async function runSendWeeklyNewsletter(): Promise<{ sent: boolean; reason?: string }> {
-  const db = getFirestore();
-
-  const draftSnap = await db
-    .collection(COLLECTIONS.DRAFTS)
-    .where('status', '==', 'approved')
-    .orderBy('generatedAt', 'desc')
-    .limit(1)
-    .get();
-
-  if (draftSnap.empty) {
-    logger.info('No approved draft to send');
-    return { sent: false, reason: 'No approved draft' };
+/** Send a specific draft by ID (used by Sunday job and manual send-now). */
+export async function sendDraftById(
+  draftId: string,
+  db?: Firestore
+): Promise<{ sent: boolean; reason?: string; publicSlug?: string }> {
+  const firestore = db ?? getFirestore();
+  const draftRef = firestore.collection(COLLECTIONS.DRAFTS).doc(draftId);
+  const draftSnap = await draftRef.get();
+  if (!draftSnap.exists) {
+    return { sent: false, reason: 'Draft not found' };
   }
-
-  const draftDoc = draftSnap.docs[0];
-  const draft = draftDoc.data();
+  const draft = draftSnap.data()!;
   if (draft.sentAt) {
     return { sent: false, reason: 'Draft already sent' };
   }
 
-  const subsSnap = await db
+  const subsSnap = await firestore
     .collection(COLLECTIONS.SUBSCRIBERS)
     .where('status', '==', 'active')
     .get();
@@ -73,7 +69,6 @@ export async function runSendWeeklyNewsletter(): Promise<{ sent: boolean; reason
       bodyHtml = (await marked.parse(draft.bodyMarkdown)) as string;
     }
   }
-  if (!bodyHtml) bodyHtml = '<p>No content.</p>';
   if (!bodyHtml) bodyHtml = '<p>No content.</p>';
 
   if (sendGridKey && subsSnap.docs.length > 0) {
@@ -120,18 +115,35 @@ export async function runSendWeeklyNewsletter(): Promise<{ sent: boolean; reason
   }
 
   const now = new Date();
-  await draftDoc.ref.update({ status: 'sent', sentAt: now });
+  await draftRef.update({ status: 'sent', sentAt: now });
 
-  await db.collection(COLLECTIONS.NEWSLETTERS).add({
+  await firestore.collection(COLLECTIONS.NEWSLETTERS).add({
     weekKey: draft.weekKey,
     sentAt: now,
     subject: draft.subject,
     bodyMarkdown: draft.bodyMarkdown,
     bodyHtml,
     publicSlug,
-    sourceDraftId: draftDoc.id,
+    sourceDraftId: draftRef.id,
   });
 
-  logger.info('Newsletter sent', { draftId: draftDoc.id, publicSlug, subscriberCount: subsSnap.size });
-  return { sent: true };
+  logger.info('Newsletter sent', { draftId: draftRef.id, publicSlug, subscriberCount: subsSnap.size });
+  return { sent: true, publicSlug };
+}
+
+/** Sunday job: send the single most recent approved draft. */
+export async function runSendWeeklyNewsletter(): Promise<{ sent: boolean; reason?: string }> {
+  const db = getFirestore();
+  const draftSnap = await db
+    .collection(COLLECTIONS.DRAFTS)
+    .where('status', '==', 'approved')
+    .orderBy('generatedAt', 'desc')
+    .limit(1)
+    .get();
+
+  if (draftSnap.empty) {
+    logger.info('No approved draft to send');
+    return { sent: false, reason: 'No approved draft' };
+  }
+  return sendDraftById(draftSnap.docs[0].id, db);
 }

@@ -1,6 +1,6 @@
 import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
-import { getWeekKey, getSevenDaysAgo } from '../lib/weekKey.js';
+import { getWeekKey, getSevenDaysAgo, getSundayOfWeekKey } from '../lib/weekKey.js';
 import { renderUserPrompt, type PromptContext } from '../lib/promptTemplate.js';
 import { getSignedUrl } from '../storage/gcs.js';
 import { generateNewsletterDraft } from '../llm/grokClient.js';
@@ -60,8 +60,9 @@ export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
       contentType: string;
       sizeBytes: number;
     }>;
+    // 7 days so images stay loadable in draft preview and in sent newsletters
     const signedUrls = await Promise.all(
-      attachments.map((a) => getSignedUrl(a.gcsPath, 60 * 24).catch(() => undefined))
+      attachments.map((a) => getSignedUrl(a.gcsPath, 60 * 24 * 7).catch(() => undefined))
     );
     memosWithUrls.push({
       id: doc.id,
@@ -98,23 +99,33 @@ export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
   });
 
   const weekRange = `${startDate.toISOString().slice(0, 10)} to ${now.toISOString().slice(0, 10)}`;
+  const sendSunday = getSundayOfWeekKey(weekKey);
+  const sendDate = sendSunday
+    ? sendSunday.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    : weekKey;
   const context: PromptContext = {
     weekRange,
+    sendDate,
     memosJson: JSON.stringify(memosWithUrls, null, 2),
     contextNewslettersJson: JSON.stringify(contextNewsletters, null, 2),
   };
   const userPrompt = renderUserPrompt(userPromptTemplate, context);
 
   const raw = await generateNewsletterDraft({ systemPrompt, userPrompt });
-  let subject = 'Weekly Update';
   let bodyMarkdown = raw;
   try {
     const parsed = JSON.parse(raw) as { subject?: string; bodyMarkdown?: string };
-    if (parsed.subject) subject = parsed.subject;
     if (parsed.bodyMarkdown) bodyMarkdown = parsed.bodyMarkdown;
   } catch {
     logger.warn('Grok response was not JSON, using raw as body');
   }
+  // Always use send date for subject (no "Week of" range)
+  const subject = sendDate ? `The Greg Chronicle — ${sendDate}` : 'The Greg Chronicle — Weekly Update';
 
   const draftRef = await db.collection(COLLECTIONS.DRAFTS).add({
     weekKey,

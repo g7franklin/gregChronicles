@@ -25,13 +25,13 @@ Pick 3–6 sections based on the memo content. Use NYT-style names as inspiratio
 ## Output format
 Respond with a single JSON object: {"subject": "...", "bodyMarkdown": "..."}
 
-- **subject**: e.g. "The Greg Chronicle — Week of Feb 15–22, 2026"
+- **subject**: Use the send date only, e.g. "The Greg Chronicle — March 2, 2026" or "The Greg Chronicle — Sunday, March 2, 2026". Do NOT use "Week of [date range]".
 - **bodyMarkdown**: HTML with inline styles for email. Structure it like the NYT:
 
 1. **Masthead** (full width, centered):
    - Main title: "THE GREG CHRONICLE" in large bold (e.g. 24–28px), serif
    - Motto: "All the News That's Fit to Print About Greg" in smaller serif
-   - Date line: "NEW YORK, [DAY], [DATE]" or "Week of [date range]"
+   - Date line: Use the send date only, e.g. "NEW YORK, SUNDAY, MARCH 2, 2026". Do NOT use "Week of [date range]".
    - Thin horizontal rule below
 
 2. **Articles** (each article block):
@@ -57,7 +57,8 @@ Respond with a single JSON object: {"subject": "...", "bodyMarkdown": "..."}
 
 7. **No raw Markdown**—only valid HTML. Use <a href="..."> for media links. Support both image and video attachments.`;
 
-export const DEFAULT_USER_PROMPT_TEMPLATE = `Generate the weekly newspaper "The Greg Chronicle" for the period: {{WEEK_RANGE}}
+export const DEFAULT_USER_PROMPT_TEMPLATE = `Generate the weekly newspaper "The Greg Chronicle" for the send date: {{SEND_DATE}}
+(Memos below are from the period {{WEEK_RANGE}}.)
 
 ## Memos from this week (with attachment metadata when present)
 {{MEMOS_JSON}}
@@ -67,4 +68,6 @@ export const DEFAULT_USER_PROMPT_TEMPLATE = `Generate the weekly newspaper "The 
 
 {{STYLE_GUIDELINES}}
 
-Respond with a single JSON object: {"subject": "Newspaper-style headline with date", "bodyMarkdown": "HTML newspaper layout styled like The New York Times: masthead, 2–3 column table layout, sections, horizontal rules, photos and videos embedded within articles, ~500–700 words total for a 5-minute read"}.`;
+Use the send date ({{SEND_DATE}}) for the subject line and masthead date line—e.g. "The Greg Chronicle — March 2, 2026". Do NOT use "Week of [date range]".
+
+Respond with a single JSON object: {"subject": "The Greg Chronicle — [send date only]", "bodyMarkdown": "HTML newspaper layout styled like The New York Times: masthead with send date, 2–3 column table layout, sections, horizontal rules, photos and videos embedded within articles, ~500–700 words total for a 5-minute read"}.`;
