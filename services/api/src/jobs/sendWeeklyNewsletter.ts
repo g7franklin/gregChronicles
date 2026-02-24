@@ -65,16 +65,22 @@ export async function runSendWeeklyNewsletter(): Promise<{ sent: boolean; reason
 
   let bodyHtml = draft.bodyHtml;
   if (!bodyHtml && draft.bodyMarkdown) {
-    const { marked } = await import('marked');
-    bodyHtml = (await marked.parse(draft.bodyMarkdown)) as string;
+    const looksLikeHtml = /^\s*</.test(draft.bodyMarkdown) || draft.bodyMarkdown.includes('<div') || draft.bodyMarkdown.includes('<p ');
+    if (looksLikeHtml) {
+      bodyHtml = draft.bodyMarkdown;
+    } else {
+      const { marked } = await import('marked');
+      bodyHtml = (await marked.parse(draft.bodyMarkdown)) as string;
+    }
   }
+  if (!bodyHtml) bodyHtml = '<p>No content.</p>';
   if (!bodyHtml) bodyHtml = '<p>No content.</p>';
 
   if (sendGridKey && subsSnap.docs.length > 0) {
     const sg = (await import('@sendgrid/mail')).default;
     sg.setApiKey(sendGridKey);
     const from = process.env.SENDGRID_FROM ?? 'newsletter@example.com';
-    const fromName = process.env.SENDGRID_FROM_NAME ?? 'Life Newsletter';
+    const fromName = process.env.SENDGRID_FROM_NAME ?? "The Greg Chronicle";
     const publicBase = process.env.PUBLIC_WEB_URL ?? baseUrl;
     for (const subDoc of subsSnap.docs) {
       const sub = subDoc.data();

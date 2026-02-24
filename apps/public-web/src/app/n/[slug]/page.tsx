@@ -56,7 +56,7 @@ export default function NewsletterPage() {
       <header className="border-b bg-white">
         <div className="max-w-2xl mx-auto px-4 py-4 flex justify-between items-center">
           <Link href="/" className="font-semibold text-lg text-stone-800">
-            Life Newsletter
+            The Greg Chronicle
           </Link>
           <Link href="/archive" className="text-stone-600 hover:underline text-sm">
             Archive
@@ -64,23 +64,29 @@ export default function NewsletterPage() {
         </div>
       </header>
       <article className="max-w-2xl mx-auto px-4 py-12">
-        <h1 className="text-2xl font-semibold text-stone-800 mb-2">{newsletter.subject}</h1>
-        <p className="text-sm text-stone-500 mb-8">
+        <div
+          className="p-8 bg-[#fafaf8] border border-stone-300"
+          style={{
+            fontFamily: 'Georgia, "Times New Roman", serif',
+            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.08)',
+          }}
+        >
+          {newsletter.bodyHtml ? (
+            <div
+              className="newspaper-content max-w-[600px] mx-auto [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"
+              dangerouslySetInnerHTML={{ __html: newsletter.bodyHtml }}
+            />
+          ) : newsletter.bodyMarkdown ? (
+            <pre className="whitespace-pre-wrap font-sans text-stone-700 text-sm">
+              {newsletter.bodyMarkdown}
+            </pre>
+          ) : (
+            <p className="text-stone-500">No content.</p>
+          )}
+        </div>
+        <p className="mt-4 text-sm text-stone-500 text-center">
           {newsletter.sentAt ? new Date(newsletter.sentAt).toLocaleDateString() : ''}
         </p>
-        <div
-          className="prose prose-stone max-w-none"
-          dangerouslySetInnerHTML={
-            newsletter.bodyHtml
-              ? { __html: newsletter.bodyHtml }
-              : undefined
-          }
-        />
-        {!newsletter.bodyHtml && newsletter.bodyMarkdown && (
-          <pre className="whitespace-pre-wrap font-sans text-stone-700">
-            {newsletter.bodyMarkdown}
-          </pre>
-        )}
       </article>
     </div>
   );

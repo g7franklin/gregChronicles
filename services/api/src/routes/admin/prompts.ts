@@ -5,15 +5,111 @@ import { COLLECTIONS } from '../../db/firestore.js';
 import { AuthRequest } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
 import { getPlaceholders } from '../../lib/promptTemplate.js';
+import { renderUserPrompt } from '../../lib/promptTemplate.js';
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../../lib/defaultPrompt.js';
+import { generateNewsletterDraft } from '../../llm/grokClient.js';
 
 const router = Router();
 
 const createSchema = z.object({
   systemPrompt: z.string(),
-  userPromptTemplate: z.string(),
   notes: z.string().optional(),
 });
+
+const testSchema = z.object({
+  systemPrompt: z.string(),
+});
+
+const FAKE_MEMOS_JSON = JSON.stringify(
+  [
+    {
+      id: 'm1',
+      createdAt: '2026-02-18T10:00:00.000Z',
+      transcript: 'Had a great morning run around the lake. Saw three deer. Weather was perfect. Took a photo of the sunrise over the water and a short video of the deer.',
+      title: 'Morning run',
+      attachmentSummary: 'Photo and video from lake run',
+      attachments: [
+        {
+          id: 'att1',
+          type: 'image',
+          originalName: 'lake-sunrise.jpg',
+          contentType: 'image/jpeg',
+          sizeBytes: 245000,
+          signedUrl: 'https://picsum.photos/id/10/400/300',
+        },
+        {
+          id: 'att1b',
+          type: 'video',
+          originalName: 'deer-at-lake.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: 1250000,
+          signedUrl: 'https://www.w3schools.com/html/mov_bbb.mp4',
+        },
+      ],
+    },
+    {
+      id: 'm2',
+      createdAt: '2026-02-20T14:30:00.000Z',
+      transcript: 'Finally finished that book I was reading. The ending was unexpected but satisfying.',
+      title: 'Book finished',
+      attachmentSummary: null,
+      attachments: [],
+    },
+    {
+      id: 'm3',
+      createdAt: '2026-02-21T09:15:00.000Z',
+      transcript: 'Tried a new recipe for dinner—spicy Thai noodles. Everyone loved it. Here is a pic of the final dish.',
+      title: 'Dinner success',
+      attachmentSummary: 'Photo of Thai noodles',
+      attachments: [
+        {
+          id: 'att2',
+          type: 'image',
+          originalName: 'thai-noodles.jpg',
+          contentType: 'image/jpeg',
+          sizeBytes: 312000,
+          signedUrl: 'https://picsum.photos/id/292/400/300',
+        },
+      ],
+    },
+    {
+      id: 'm4',
+      createdAt: '2026-02-22T16:00:00.000Z',
+      transcript: 'Went for a hike at the state park. Trail was muddy but the views from the summit were worth it. Recorded a quick video of the panorama.',
+      title: 'Weekend hike',
+      attachmentSummary: 'Photo and video from trail summit',
+      attachments: [
+        {
+          id: 'att3',
+          type: 'image',
+          originalName: 'hike-summit.jpg',
+          contentType: 'image/jpeg',
+          sizeBytes: 189000,
+          signedUrl: 'https://picsum.photos/id/11/400/300',
+        },
+        {
+          id: 'att3b',
+          type: 'video',
+          originalName: 'summit-panorama.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: 2100000,
+          signedUrl: 'https://www.w3schools.com/html/movie.mp4',
+        },
+      ],
+    },
+  ],
+  null,
+  2
+);
+
+const FAKE_NEWSLETTERS_JSON = JSON.stringify(
+  [
+    { id: 'n1', subject: 'Last Week in Review', bodyMarkdown: 'A quiet week with some good reading...' },
+    { id: 'n2', subject: 'Catching Up', bodyMarkdown: 'Work was busy but managed to squeeze in a hike...' },
+  ],
+  null,
+  2
+);
 
 router.get('/active', async (_req: AuthRequest, res: Response) => {
   try {
@@ -90,7 +186,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     const newRef = getFirestore().collection(COLLECTIONS.PROMPT_VERSIONS).doc();
     batch.set(newRef, {
       systemPrompt: parsed.data.systemPrompt,
-      userPromptTemplate: parsed.data.userPromptTemplate,
+      userPromptTemplate: DEFAULT_USER_PROMPT_TEMPLATE,
       notes: parsed.data.notes ?? '',
       isActive: true,
       createdAt: new Date(),
@@ -158,6 +254,54 @@ router.post('/reset-default', async (req: AuthRequest, res: Response) => {
 
 router.get('/placeholders', async (_req: AuthRequest, res: Response) => {
   res.json({ placeholders: getPlaceholders() });
+});
+
+router.post('/test', async (req: AuthRequest, res: Response) => {
+  try {
+    const parsed = testSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
+      return;
+    }
+    const userPrompt = renderUserPrompt(DEFAULT_USER_PROMPT_TEMPLATE, {
+      weekRange: '2026-02-15 to 2026-02-22',
+      memosJson: FAKE_MEMOS_JSON,
+      contextNewslettersJson: FAKE_NEWSLETTERS_JSON,
+      styleGuidelines: '',
+    });
+    const raw = await generateNewsletterDraft({
+      systemPrompt: parsed.data.systemPrompt,
+      userPrompt,
+    });
+    let subject: string | null = null;
+    let bodyMarkdown = raw;
+    try {
+      const parsedJson = JSON.parse(raw) as { subject?: string; bodyMarkdown?: string };
+      subject = parsedJson.subject ?? null;
+      bodyMarkdown = parsedJson.bodyMarkdown ?? raw;
+    } catch {
+      // raw is not JSON, use as-is
+    }
+    let bodyHtml: string;
+    const looksLikeHtml = /^\s*</.test(bodyMarkdown) || bodyMarkdown.includes('<div') || bodyMarkdown.includes('<p ');
+    if (looksLikeHtml) {
+      bodyHtml = bodyMarkdown;
+    } else {
+      try {
+        const { marked } = await import('marked');
+        bodyHtml = (await marked.parse(bodyMarkdown)) as string;
+      } catch {
+        bodyHtml = bodyMarkdown;
+      }
+    }
+    res.json({ raw, subject, bodyMarkdown, bodyHtml });
+  } catch (err) {
+    logger.error('POST /admin/prompts/test', err);
+    res.status(500).json({
+      error: 'Test failed',
+      details: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 export default router;

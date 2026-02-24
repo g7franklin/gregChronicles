@@ -1,39 +1,40 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { apiGet, apiPost } from '@/lib/api';
 
 type ActivePrompt = {
   id: string | null;
   systemPrompt: string;
-  userPromptTemplate: string;
   notes?: string;
   isDefault?: boolean;
-  placeholders?: string[];
+};
+
+type TestResult = {
+  raw: string;
+  subject: string | null;
+  bodyMarkdown: string;
+  bodyHtml?: string;
 };
 
 export default function PromptPage() {
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [userPromptTemplate, setUserPromptTemplate] = useState('');
   const [notes, setNotes] = useState('');
-  const [placeholders, setPlaceholders] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [previewVars, setPreviewVars] = useState('');
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
   const load = () => {
     setLoading(true);
-    Promise.all([
-      apiGet<ActivePrompt>('/admin/prompts/active'),
-      apiGet<{ placeholders: string[] }>('/admin/prompts/placeholders').catch(() => ({ placeholders: [] })),
-    ])
-      .then(([active, pl]) => {
+    apiGet<ActivePrompt>('/admin/prompts/active')
+      .then((active) => {
         setSystemPrompt(active.systemPrompt ?? '');
-        setUserPromptTemplate(active.userPromptTemplate ?? '');
         setNotes(active.notes ?? '');
-        setPlaceholders(pl.placeholders ?? []);
       })
       .finally(() => setLoading(false));
   };
@@ -42,12 +43,25 @@ export default function PromptPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    const iframe = previewIframeRef.current;
+    const html = testResult?.bodyHtml ?? testResult?.bodyMarkdown;
+    if (!iframe || !html) return;
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    doc.open();
+    doc.write(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:Georgia,"Times New Roman",serif;background:#fafaf8;color:#222;margin:0;padding:24px;font-size:14px;line-height:1.5}a{color:#333;text-decoration:underline}</style></head><body><div style="max-width:600px;margin:0 auto">${html.replace(/<script\b[\s\S]*?<\/script>/gi, '')}</div></body></html>`
+    );
+    doc.close();
+  }, [testResult]);
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setMessage(null);
     try {
-      await apiPost('/admin/prompts', { systemPrompt, userPromptTemplate, notes });
+      await apiPost('/admin/prompts', { systemPrompt, notes });
       setMessage('Saved and set as active.');
       load();
     } catch (e) {
@@ -72,13 +86,18 @@ export default function PromptPage() {
     }
   };
 
-  const updatePreview = () => {
-    let out = userPromptTemplate;
-    out = out.replace(/\{\{WEEK_RANGE\}\}/g, '2026-02-15 to 2026-02-22');
-    out = out.replace(/\{\{MEMOS_JSON\}\}/g, '[{"id":"m1","transcript":"Sample memo..."}]');
-    out = out.replace(/\{\{CONTEXT_NEWSLETTERS_JSON\}\}/g, '[{"subject":"Last week"}]');
-    out = out.replace(/\{\{STYLE_GUIDELINES\}\}/g, '(optional style notes)');
-    setPreviewVars(out);
+  const runTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    setTestError(null);
+    try {
+      const result = (await apiPost('/admin/prompts/test', { systemPrompt })) as TestResult;
+      setTestResult(result);
+    } catch (e) {
+      setTestError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
+    }
   };
 
   if (loading) {
@@ -94,7 +113,7 @@ export default function PromptPage() {
       <div className="max-w-4xl mx-auto">
         <h1 className="text-2xl font-semibold mb-4">Prompt Editor</h1>
         <p className="text-slate-600 mb-4">
-          The Saturday draft job loads the latest active prompt. Edit and save to use a new version.
+          Edit the system prompt. The Saturday draft job uses the active prompt with a fixed user template (memos + context). Save to set as active.
         </p>
         <form onSubmit={save} className="space-y-4">
           <div>
@@ -102,19 +121,7 @@ export default function PromptPage() {
             <textarea
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={8}
-              className="w-full border rounded-lg p-2 font-mono text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">User prompt template</label>
-            <p className="text-xs text-slate-500 mb-1">
-              Placeholders: {placeholders.join(', ')}
-            </p>
-            <textarea
-              value={userPromptTemplate}
-              onChange={(e) => setUserPromptTemplate(e.target.value)}
-              rows={14}
+              rows={10}
               className="w-full border rounded-lg p-2 font-mono text-sm"
             />
           </div>
@@ -145,22 +152,61 @@ export default function PromptPage() {
           </div>
           {message && <p className="text-sm text-slate-600">{message}</p>}
         </form>
+
         <div className="mt-8 border-t pt-6">
-          <h2 className="text-lg font-medium mb-2">Preview variables</h2>
-          <p className="text-sm text-slate-600 mb-2">
-            Example of how the user prompt will look with sample data injected.
+          <h2 className="text-lg font-medium mb-2">Test prompt</h2>
+          <p className="text-sm text-slate-600 mb-3">
+            Run the current system prompt with fake memos and context to see sample output. Uses the same format as the Saturday job.
           </p>
           <button
             type="button"
-            onClick={updatePreview}
-            className="px-3 py-1 bg-slate-200 rounded text-sm mb-2"
+            onClick={runTest}
+            disabled={testing || !systemPrompt.trim()}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-lg disabled:opacity-50 hover:bg-emerald-700"
           >
-            Generate preview
+            {testing ? 'Testing…' : 'Run test'}
           </button>
-          {previewVars && (
-            <pre className="bg-slate-100 p-4 rounded text-xs overflow-auto max-h-64 whitespace-pre-wrap">
-              {previewVars}
-            </pre>
+          {testError && (
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+              {testError}
+            </div>
+          )}
+          {testResult && (
+            <div className="mt-4 space-y-4">
+              {testResult.subject && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Subject (email subject line)</label>
+                  <p className="p-2 bg-slate-100 rounded font-medium">{testResult.subject}</p>
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Preview: How it looks to recipients
+                </label>
+                <div className="mt-1 overflow-hidden rounded border border-stone-300 bg-[#fafaf8]">
+                  {(testResult.bodyHtml ?? testResult.bodyMarkdown) ? (
+                    <iframe
+                      ref={previewIframeRef}
+                      title="Newsletter preview"
+                      className="w-full border-0 h-[32rem]"
+                      sandbox="allow-same-origin"
+                    />
+                  ) : (
+                    <pre className="p-8 whitespace-pre-wrap text-sm text-slate-600 max-h-[32rem] overflow-auto">
+                      {testResult.bodyMarkdown}
+                    </pre>
+                  )}
+                </div>
+              </div>
+              <details className="text-sm">
+                <summary className="cursor-pointer text-slate-600 hover:text-slate-800">
+                  Raw source (bodyMarkdown)
+                </summary>
+                <pre className="mt-2 p-4 bg-slate-100 rounded text-xs overflow-auto max-h-48 whitespace-pre-wrap">
+                  {testResult.bodyMarkdown}
+                </pre>
+              </details>
+            </div>
           )}
         </div>
       </div>
