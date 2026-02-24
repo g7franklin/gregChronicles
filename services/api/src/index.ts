@@ -9,6 +9,7 @@ import draftsRouter from './routes/admin/drafts.js';
 import promptsRouter from './routes/admin/prompts.js';
 import publicRouter from './routes/public.js';
 import tasksRouter from './routes/tasks.js';
+import mediaRouter from './routes/media.js';
 import { logger } from './lib/logger.js';
 import { getProjectId } from './config.js';
 import { getFirestore } from './db/firestore.js';
@@ -63,6 +64,7 @@ app.use('/admin/drafts', requireAuth, requireAdmin, draftsRouter);
 app.use('/admin/prompts', requireAuth, requireAdmin, promptsRouter);
 app.use('/public', publicRouter);
 app.use('/tasks', tasksRouter);
+app.use('/media', mediaRouter);
 
 // Global error handler so uncaught errors (e.g. multer) return JSON with details
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -4,6 +4,7 @@ import type { Firestore } from '@google-cloud/firestore';
 import { logger } from '../lib/logger.js';
 import { getApiBaseUrl } from '../config.js';
 import { createUnsubscribeToken } from '../lib/unsubscribeToken.js';
+import { replaceGcsUrlsWithMediaProxy } from '../lib/mediaUrls.js';
 
 async function getSecret(name: string): Promise<string> {
   if (process.env.NODE_ENV !== 'production') {
@@ -70,6 +71,8 @@ export async function sendDraftById(
     }
   }
   if (!bodyHtml) bodyHtml = '<p>No content.</p>';
+
+  bodyHtml = replaceGcsUrlsWithMediaProxy(bodyHtml);
 
   if (sendGridKey && subsSnap.docs.length > 0) {
     const sg = (await import('@sendgrid/mail')).default;

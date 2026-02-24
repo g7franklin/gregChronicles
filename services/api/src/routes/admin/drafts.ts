@@ -7,8 +7,7 @@ import { logger } from '../../lib/logger.js';
 import { runGenerateWeeklyDraft } from '../../jobs/generateWeeklyDraft.js';
 import { sendDraftById } from '../../jobs/sendWeeklyNewsletter.js';
 import { generateDraftEdit } from '../../llm/grokClient.js';
-import { getSignedUrl } from '../../storage/gcs.js';
-import { getBucketName } from '../../config.js';
+import { replaceGcsUrlsWithMediaProxy } from '../../lib/mediaUrls.js';
 import { getSundayOfWeekKey, getWeekKey } from '../../lib/weekKey.js';
 
 const router: IRouter = Router();
@@ -117,7 +116,7 @@ router.get('/current', async (_req: AuthRequest, res: Response) => {
   }
 });
 
-/** Returns bodyMarkdown with all GCS img src URLs replaced by fresh signed URLs so preview images load. */
+/** Returns bodyMarkdown with stable media proxy URLs so preview images/videos always load. */
 router.get('/:id/preview-body', async (req: AuthRequest, res: Response) => {
   try {
     const doc = await getFirestore().collection(COLLECTIONS.DRAFTS).doc(req.params.id).get();
@@ -126,33 +125,7 @@ router.get('/:id/preview-body', async (req: AuthRequest, res: Response) => {
       return;
     }
     const bodyMarkdown = (doc.data()?.bodyMarkdown as string) ?? '';
-    const bucketName = getBucketName();
-    const urlRegex = new RegExp(
-      'https://storage\\.googleapis\\.com/' + bucketName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/([^"\\s?]+)(\\?[^"]*)?',
-      'g'
-    );
-    const seen = new Map<string, string>();
-    let match: RegExpExecArray | null;
-    const replacements: Array<{ old: string; new: string }> = [];
-    while ((match = urlRegex.exec(bodyMarkdown)) !== null) {
-      const path = decodeURIComponent(match[1]);
-      const fullOld = match[0];
-      if (seen.has(path)) {
-        replacements.push({ old: fullOld, new: seen.get(path)! });
-      } else {
-        try {
-          const freshUrl = await getSignedUrl(path, 60);
-          seen.set(path, freshUrl);
-          replacements.push({ old: fullOld, new: freshUrl });
-        } catch {
-          // leave URL unchanged if we can't sign
-        }
-      }
-    }
-    let out = bodyMarkdown;
-    for (const { old: oldUrl, new: newUrl } of replacements) {
-      out = out.split(oldUrl).join(newUrl);
-    }
+    const out = replaceGcsUrlsWithMediaProxy(bodyMarkdown);
     res.json({ bodyMarkdown: out });
   } catch (err) {
     logger.error('GET /admin/drafts/:id/preview-body failed', err);

@@ -34,6 +34,7 @@ export default function NewsletterPage() {
   const [sendNowPhrase, setSendNowPhrase] = useState('');
   const [sendNowLoading, setSendNowLoading] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -83,6 +84,24 @@ export default function NewsletterPage() {
       loadPreviewBody(draft.id);
     }
   }, [draft?.id]);
+
+  /**
+   * Sanitize video tags in HTML before rendering:
+   * - Remove autoplay/loop/muted so videos don't load or play until clicked
+   * - Add controls, playsinline, preload="metadata"
+   * Done as string transform so the browser never sees autoplay attributes.
+   */
+  function sanitizeVideoHtml(html: string): string {
+    return html.replace(/<video\b([^>]*)>/gi, (_match, attrs: string) => {
+      let cleaned = attrs
+        .replace(/\s*(autoplay|loop|muted)\b/gi, '')
+        .replace(/\s*preload=["'][^"']*["']/gi, '');
+      if (!/controls/i.test(cleaned)) cleaned += ' controls';
+      if (!/playsinline/i.test(cleaned)) cleaned += ' playsinline';
+      cleaned += ' preload="metadata"';
+      return `<video${cleaned}>`;
+    });
+  }
 
   const generateDraft = async () => {
     setGenerating(true);
@@ -280,7 +299,7 @@ export default function NewsletterPage() {
 
             <div className="flex flex-wrap gap-2 mb-4">
               <button
-                onClick={generateDraft}
+                onClick={() => setShowGenerateConfirm(true)}
                 disabled={generating}
                 className="px-4 py-2 bg-slate-600 text-white rounded-lg disabled:opacity-50"
               >
@@ -355,17 +374,21 @@ export default function NewsletterPage() {
                 >
                   {(previewBodyMarkdown ?? bodyMarkdown) ? (
                     (() => {
-                      const html = previewBodyMarkdown ?? bodyMarkdown;
-                      const isHtml = /^\s*</.test(html) || html.includes('<div') || html.includes('<p') || html.includes('<table');
-                      return isHtml ? (
+                      const raw = previewBodyMarkdown ?? bodyMarkdown;
+                      const isHtml = /^\s*</.test(raw) || raw.includes('<div') || raw.includes('<p') || raw.includes('<table');
+                      if (!isHtml) {
+                        return (
+                          <pre className="whitespace-pre-wrap font-sans text-stone-700 text-sm">
+                            {raw}
+                          </pre>
+                        );
+                      }
+                      const html = sanitizeVideoHtml(raw);
+                      return (
                         <div
                           className="newspaper-content max-w-[600px] mx-auto [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"
                           dangerouslySetInnerHTML={{ __html: html }}
                         />
-                      ) : (
-                        <pre className="whitespace-pre-wrap font-sans text-stone-700 text-sm">
-                          {html}
-                        </pre>
                       );
                     })()
                   ) : (
@@ -459,6 +482,37 @@ export default function NewsletterPage() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+        {showGenerateConfirm && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={(e) => e.target === e.currentTarget && setShowGenerateConfirm(false)}
+          >
+            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-semibold text-slate-800 mb-2">Generate new draft?</h2>
+              <p className="text-slate-600 mb-4">
+                This will create a new draft from your latest memos. Your current draft will still
+                exist but will no longer be shown as the current week&apos;s draft.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setShowGenerateConfirm(false)}
+                  className="px-4 py-2 border rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowGenerateConfirm(false);
+                    generateDraft();
+                  }}
+                  className="px-4 py-2 bg-slate-700 text-white rounded-lg"
+                >
+                  Yes, generate new draft
+                </button>
+              </div>
             </div>
           </div>
         )}

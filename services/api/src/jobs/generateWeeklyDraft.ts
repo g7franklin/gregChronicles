@@ -2,7 +2,7 @@ import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
 import { getWeekKey, getSevenDaysAgo, getSundayOfWeekKey } from '../lib/weekKey.js';
 import { renderUserPrompt, type PromptContext } from '../lib/promptTemplate.js';
-import { getSignedUrl } from '../storage/gcs.js';
+import { getApiBaseUrl } from '../config.js';
 import { generateNewsletterDraft } from '../llm/grokClient.js';
 import { logger } from '../lib/logger.js';
 
@@ -49,6 +49,7 @@ export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
     .orderBy('createdAt', 'asc')
     .get();
 
+  const apiBase = getApiBaseUrl().replace(/\/$/, '');
   const memosWithUrls: MemoForContext[] = [];
   for (const doc of memosSnap.docs) {
     const data = doc.data();
@@ -60,23 +61,19 @@ export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
       contentType: string;
       sizeBytes: number;
     }>;
-    // 7 days so images stay loadable in draft preview and in sent newsletters
-    const signedUrls = await Promise.all(
-      attachments.map((a) => getSignedUrl(a.gcsPath, 60 * 24 * 7).catch(() => undefined))
-    );
     memosWithUrls.push({
       id: doc.id,
       createdAt: data.createdAt?.toDate?.()?.toISOString?.() ?? '',
       transcript: data.transcript ?? '',
       title: data.title,
       attachmentSummary: data.attachmentSummary,
-      attachments: attachments.map((a, i) => ({
+      attachments: attachments.map((a) => ({
         id: a.id,
         type: a.type,
         originalName: a.originalName,
         contentType: a.contentType,
         sizeBytes: a.sizeBytes,
-        signedUrl: signedUrls[i],
+        signedUrl: `${apiBase}/media/${a.gcsPath}`,
       })),
     });
   }

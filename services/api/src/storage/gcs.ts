@@ -38,3 +38,27 @@ export async function getSignedUrl(path: string, expiresInMinutes = 60): Promise
   });
   return url;
 }
+
+/** Get file metadata from GCS, or null if not found. */
+export async function getFileMetadata(path: string): Promise<{
+  contentType: string;
+  size: number;
+} | null> {
+  const file = getBucket().file(path);
+  const [exists] = await file.exists();
+  if (!exists) return null;
+  const [metadata] = await file.getMetadata();
+  return {
+    contentType: (metadata.contentType as string) ?? 'application/octet-stream',
+    size: Number(metadata.size ?? 0),
+  };
+}
+
+/** Create a readable stream from GCS, optionally with a byte range. */
+export function createFileStream(path: string, start?: number, end?: number): NodeJS.ReadableStream {
+  const file = getBucket().file(path);
+  const opts: { start?: number; end?: number } = {};
+  if (start !== undefined) opts.start = start;
+  if (end !== undefined) opts.end = end;
+  return file.createReadStream(opts);
+}
