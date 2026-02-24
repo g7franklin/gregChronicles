@@ -8,9 +8,9 @@ import { signOut } from '@/lib/firebase';
 
 const NAV = [
   { href: '/capture', label: 'Capture' },
+  { href: '/newsletter', label: 'Generate Newsletter' },
   { href: '/memos', label: 'Memos' },
   { href: '/subscribers', label: 'Subscribers' },
-  { href: '/newsletter', label: 'Newsletter Review' },
   { href: '/prompt', label: 'Prompt Editor' },
 ];
 
