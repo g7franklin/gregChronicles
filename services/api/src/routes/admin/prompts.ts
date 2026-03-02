@@ -9,7 +9,7 @@ import { renderUserPrompt } from '../../lib/promptTemplate.js';
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../../lib/defaultPrompt.js';
 import { generateNewsletterDraft } from '../../llm/grokClient.js';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 const createSchema = z.object({
   systemPrompt: z.string(),

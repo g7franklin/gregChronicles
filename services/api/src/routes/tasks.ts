@@ -4,7 +4,7 @@ import { runGenerateWeeklyDraft } from '../jobs/generateWeeklyDraft.js';
 import { runSendWeeklyNewsletter } from '../jobs/sendWeeklyNewsletter.js';
 import { logger } from '../lib/logger.js';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 router.use(requireTaskSecret);
 

@@ -6,7 +6,7 @@ import { COLLECTIONS } from '../../db/firestore.js';
 import { AuthRequest } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 const createSchema = z.object({
   name: z.string().min(1),

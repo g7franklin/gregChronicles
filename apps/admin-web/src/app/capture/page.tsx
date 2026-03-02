@@ -59,7 +59,8 @@ export default function CapturePage() {
       const SpeechRecognition = (window as unknown as { SpeechRecognition?: new () => unknown }).SpeechRecognition
         ?? (window as unknown as { webkitSpeechRecognition?: new () => unknown }).webkitSpeechRecognition;
       if (SpeechRecognition) {
-        const rec = new SpeechRecognition();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rec: any = new SpeechRecognition();
         rec.continuous = true;
         rec.interimResults = true;
         rec.onresult = (e: { results: Iterable<{ isFinal: boolean; [key: number]: { transcript: string } }> }) => {

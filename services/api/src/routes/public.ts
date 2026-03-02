@@ -6,7 +6,7 @@ import { COLLECTIONS } from '../db/firestore.js';
 import { logger } from '../lib/logger.js';
 import { verifyUnsubscribeToken } from '../lib/unsubscribeToken.js';
 
-const router = Router();
+const router: ReturnType<typeof Router> = Router();
 
 const subscribeSchema = z.object({
   name: z.string().min(1),

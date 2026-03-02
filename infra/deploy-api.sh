@@ -19,7 +19,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --region "$REGION" \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME}" \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},FIRESTORE_DATABASE_ID=gregchronicles,GROK_MODEL=grok-3" \
   --set-secrets "TASK_SECRET=TASK_SECRET:latest,GROK_API_KEY=GROK_API_KEY:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,TWILIO_ACCOUNT_SID=TWILIO_ACCOUNT_SID:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest,UNSUBSCRIBE_SECRET=UNSUBSCRIBE_SECRET:latest" \
   --project "$PROJECT_ID"
 

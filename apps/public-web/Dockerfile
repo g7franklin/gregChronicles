@@ -2,10 +2,11 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-COPY package.json pnpm-lock.yaml* ./
-RUN corepack enable pnpm && pnpm install --frozen-lockfile || pnpm install
+COPY package.json ./
+RUN npm install
 COPY . .
-RUN pnpm build
+RUN mkdir -p public
+RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
