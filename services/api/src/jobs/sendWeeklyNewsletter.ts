@@ -6,6 +6,7 @@ import { getApiBaseUrl } from '../config.js';
 import { createUnsubscribeToken } from '../lib/unsubscribeToken.js';
 import { replaceGcsUrlsWithMediaProxy } from '../lib/mediaUrls.js';
 import { getWeekKey } from '../lib/weekKey.js';
+import { htmlToPlainText, wrapHtmlEmail } from '../lib/emailFormat.js';
 
 async function getSecret(name: string): Promise<string> {
   if (process.env.NODE_ENV !== 'production') {
@@ -87,12 +88,21 @@ export async function sendDraftById(
       if (!email) continue;
       const unsubToken = createUnsubscribeToken(subDoc.id);
       const unsubUrl = `${publicBase.replace(/\/$/, '')}/unsubscribe?token=${encodeURIComponent(unsubToken)}`;
+      const footerHtml = `<p style="font-size:12px;color:#999;margin-top:32px;text-align:center;"><a href="${archiveUrl}">View in browser</a> &middot; <a href="${unsubUrl}">Unsubscribe</a></p>`;
+      const fullHtml = wrapHtmlEmail(bodyHtml + footerHtml, draft.subject ?? 'Weekly Newsletter');
+      const plainText = htmlToPlainText(bodyHtml)
+        + `\n\nView in browser: ${archiveUrl}\nUnsubscribe: ${unsubUrl}\n`;
       try {
         await sg.send({
           to: email,
           from: { email: from, name: fromName },
           subject: draft.subject ?? 'Weekly Newsletter',
-          html: bodyHtml + `<p><a href="${archiveUrl}">View in browser</a></p><p><a href="${unsubUrl}">Unsubscribe</a></p>`,
+          html: fullHtml,
+          text: plainText,
+          headers: {
+            'List-Unsubscribe': `<${unsubUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          },
         });
         logger.info('SendGrid email sent successfully', { email });
       } catch (err: unknown) {
@@ -109,6 +119,8 @@ export async function sendDraftById(
   if (twilioAccountSid && twilioAuthToken && twilioFrom) {
     const twilio = (await import('twilio')).default;
     const client = twilio(twilioAccountSid, twilioAuthToken);
+    const smsEligible = subsSnap.docs.filter((d) => d.data().smsConsent && d.data().phone);
+    logger.info('Sending SMS notifications', { eligible: smsEligible.length, total: subsSnap.size });
     for (const subDoc of subsSnap.docs) {
       const sub = subDoc.data();
       if (!sub.smsConsent || !sub.phone) continue;
@@ -122,6 +134,10 @@ export async function sendDraftById(
         logger.error('Twilio send failed', err, { phone: sub.phone });
       }
     }
+  } else if (!twilioFrom) {
+    logger.warn('SMS skipped — TWILIO_FROM env var is not set');
+  } else if (!twilioAccountSid || !twilioAuthToken) {
+    logger.warn('SMS skipped — Twilio credentials not configured');
   }
 
   const now = new Date();

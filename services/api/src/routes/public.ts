@@ -9,7 +9,7 @@ import { verifyUnsubscribeToken } from '../lib/unsubscribeToken.js';
 const router: ReturnType<typeof Router> = Router();
 
 const subscribeSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().optional(),
   email: z.string().email(),
   phone: z.string().optional(),
   smsConsent: z.boolean().optional(),
@@ -78,9 +78,10 @@ router.post('/subscribe', async (req, res: Response) => {
       res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
       return;
     }
+    const normalizedEmail = parsed.data.email.toLowerCase().trim();
     const existing = await getFirestore()
       .collection(COLLECTIONS.SUBSCRIBERS)
-      .where('email', '==', parsed.data.email)
+      .where('email', '==', normalizedEmail)
       .limit(1)
       .get();
     if (!existing.empty) {
@@ -92,7 +93,7 @@ router.post('/subscribe', async (req, res: Response) => {
       const ref = existing.docs[0].ref;
       const token = crypto.randomBytes(32).toString('hex');
       await ref.update({
-        name: parsed.data.name,
+        name: parsed.data.name ?? '',
         phone: parsed.data.phone ?? '',
         smsConsent: parsed.data.smsConsent ?? false,
         status: 'active',
@@ -104,8 +105,8 @@ router.post('/subscribe', async (req, res: Response) => {
     }
     const token = crypto.randomBytes(32).toString('hex');
     const doc = {
-      name: parsed.data.name,
-      email: parsed.data.email,
+      name: parsed.data.name ?? '',
+      email: normalizedEmail,
       phone: parsed.data.phone ?? '',
       smsConsent: parsed.data.smsConsent ?? false,
       status: 'active',

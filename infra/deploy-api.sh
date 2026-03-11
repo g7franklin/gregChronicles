@@ -14,12 +14,17 @@ pnpm build
 
 IMAGE="gcr.io/${PROJECT_ID}/${SERVICE_NAME}:$(date +%s)"
 gcloud builds submit --tag "$IMAGE" --project "$PROJECT_ID" .
+
+SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format 'value(status.url)' --project "$PROJECT_ID" 2>/dev/null || echo "")
+API_BASE=${API_BASE_URL:-$SERVICE_URL}
+PUBLIC_WEB=${PUBLIC_WEB_URL:-$API_BASE}
+
 gcloud run deploy "$SERVICE_NAME" \
   --image "$IMAGE" \
   --region "$REGION" \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},FIRESTORE_DATABASE_ID=gregchronicles,GROK_MODEL=grok-3" \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},FIRESTORE_DATABASE_ID=gregchronicles,GROK_MODEL=grok-3,API_BASE_URL=${API_BASE},PUBLIC_WEB_URL=${PUBLIC_WEB},SENDGRID_FROM=newsletter@gregchronicles.com,SENDGRID_FROM_NAME=The Greg Chronicle,TWILIO_FROM=+18777804236" \
   --set-secrets "TASK_SECRET=TASK_SECRET:latest,GROK_API_KEY=GROK_API_KEY:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,TWILIO_ACCOUNT_SID=TWILIO_ACCOUNT_SID:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest,UNSUBSCRIBE_SECRET=UNSUBSCRIBE_SECRET:latest" \
   --project "$PROJECT_ID"
 

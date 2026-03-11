@@ -44,7 +44,7 @@ export default function NewsletterPage() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4">
         <p className="text-stone-600">Newsletter not found.</p>
-        <Link href="/archive" className="text-stone-800 underline">
+        <Link href="/" className="text-stone-800 underline">
           Back to archive
         </Link>
       </div>
@@ -54,16 +54,16 @@ export default function NewsletterPage() {
   return (
     <div className="min-h-screen">
       <header className="border-b bg-white">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex justify-between items-center">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
           <Link href="/" className="font-semibold text-lg text-stone-800">
-            The Greg Chronicle
+            Greg Chronicles
           </Link>
-          <Link href="/archive" className="text-stone-600 hover:underline text-sm">
-            Archive
+          <Link href="/subscribe" className="text-stone-600 hover:underline text-sm">
+            Subscribe
           </Link>
         </div>
       </header>
-      <article className="max-w-2xl mx-auto px-4 py-12">
+      <article className="max-w-5xl mx-auto px-4 py-12">
         <div
           className="p-8 bg-[#fafaf8] border border-stone-300"
           style={{
@@ -73,7 +73,7 @@ export default function NewsletterPage() {
         >
           {newsletter.bodyHtml ? (
             <div
-              className="newspaper-content max-w-[600px] mx-auto [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"
+              className="newspaper-content [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"
               dangerouslySetInnerHTML={{ __html: newsletter.bodyHtml }}
             />
           ) : newsletter.bodyMarkdown ? (
