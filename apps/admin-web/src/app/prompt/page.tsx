@@ -24,6 +24,7 @@ export default function PromptPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
   const [message, setMessage] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
@@ -91,7 +92,7 @@ export default function PromptPage() {
     setTestResult(null);
     setTestError(null);
     try {
-      const result = (await apiPost('/admin/prompts/test', { systemPrompt })) as TestResult;
+      const result = (await apiPost('/admin/prompts/test', { systemPrompt, provider: llmProvider })) as TestResult;
       setTestResult(result);
     } catch (e) {
       setTestError(e instanceof Error ? e.message : String(e));
@@ -158,6 +159,33 @@ export default function PromptPage() {
           <p className="text-sm text-slate-600 mb-3">
             Run the current system prompt with fake memos and context to see sample output. Uses the same format as the Saturday job.
           </p>
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-sm font-medium text-slate-700">AI model:</span>
+            <div className="flex bg-slate-100 rounded-lg p-0.5">
+              <button
+                type="button"
+                onClick={() => setLlmProvider('claude')}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  llmProvider === 'claude'
+                    ? 'bg-white shadow-sm text-slate-800 font-medium'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Claude
+              </button>
+              <button
+                type="button"
+                onClick={() => setLlmProvider('grok')}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  llmProvider === 'grok'
+                    ? 'bg-white shadow-sm text-slate-800 font-medium'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Grok
+              </button>
+            </div>
+          </div>
           <button
             type="button"
             onClick={runTest}

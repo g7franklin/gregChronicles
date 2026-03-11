@@ -3,7 +3,7 @@ import { COLLECTIONS } from '../db/firestore.js';
 import { getWeekKey, getMostRecentSunday, getSundayOfWeekKey } from '../lib/weekKey.js';
 import { renderUserPrompt, type PromptContext } from '../lib/promptTemplate.js';
 import { getApiBaseUrl } from '../config.js';
-import { generateNewsletterDraft } from '../llm/grokClient.js';
+import { generateNewsletterDraft, type LlmProvider, DEFAULT_PROVIDER } from '../llm/index.js';
 import { logger } from '../lib/logger.js';
 
 interface MemoForContext {
@@ -22,7 +22,7 @@ interface MemoForContext {
   }>;
 }
 
-export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
+export async function runGenerateWeeklyDraft(provider: LlmProvider = DEFAULT_PROVIDER): Promise<{ draftId: string }> {
   const db = getFirestore();
   const now = new Date();
   const weekKey = getWeekKey(now);
@@ -113,13 +113,13 @@ export async function runGenerateWeeklyDraft(): Promise<{ draftId: string }> {
   };
   const userPrompt = renderUserPrompt(userPromptTemplate, context);
 
-  const raw = await generateNewsletterDraft({ systemPrompt, userPrompt });
+  const raw = await generateNewsletterDraft({ systemPrompt, userPrompt }, provider);
   let bodyMarkdown = raw;
   try {
     const parsed = JSON.parse(raw) as { subject?: string; bodyMarkdown?: string };
     if (parsed.bodyMarkdown) bodyMarkdown = parsed.bodyMarkdown;
   } catch {
-    logger.warn('Grok response was not JSON, using raw as body');
+    logger.warn('LLM response was not JSON, using raw as body');
   }
   // Always use send date for subject (no "Week of" range)
   const subject = sendDate ? `The Greg Chronicle — ${sendDate}` : 'The Greg Chronicle — Weekly Update';

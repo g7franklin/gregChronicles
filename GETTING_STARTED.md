@@ -97,10 +97,11 @@ For **local dev** you can put keys in `.env`. For **deployed** API you’ll use 
 echo -n "pick-a-long-random-string-here" | gcloud secrets create TASK_SECRET --data-file=-
 
 # Required for newsletter draft generation
+echo -n "YOUR_ANTHROPIC_API_KEY" | gcloud secrets create ANTHROPIC_API_KEY --data-file=-
 echo -n "YOUR_GROK_API_KEY" | gcloud secrets create GROK_API_KEY --data-file=-
 ```
 
-Get a Grok API key from [x.ai](https://x.ai) (API / console).
+Get a Claude API key from [console.anthropic.com](https://console.anthropic.com). Get a Grok API key from [x.ai](https://x.ai) (API / console).
 
 Optional (for sending email/SMS later):
 
@@ -131,6 +132,7 @@ Edit `services/api/.env` and set at least:
 | `GOOGLE_CLOUD_PROJECT` or `GCP_PROJECT` | Your GCP Project ID |
 | `GCS_BUCKET` | Your bucket name, e.g. `life-newsletter-media-YOUR_PROJECT_ID` |
 | `TASK_SECRET` | Any long random string (e.g. `openssl rand -hex 32`) |
+| `ANTHROPIC_API_KEY` | Your Anthropic Claude API key |
 | `GROK_API_KEY` | Your xAI Grok API key |
 
 Leave `API_BASE_URL=http://localhost:8080` and `PUBLIC_WEB_URL=http://localhost:3000` for local. SendGrid/Twilio can be empty for local.
@@ -331,7 +333,7 @@ gcloud scheduler jobs create http weekly-send-job \
 | “Admin access required” | Your Firebase UID is not in `adminUsers` with `role: "admin"`. |
 | API “GOOGLE_CLOUD_PROJECT … must be set” | Set `GOOGLE_CLOUD_PROJECT` or `GCP_PROJECT` in `services/api/.env`. |
 | Memo submit fails (e.g. 500) | GCS bucket name in `.env` must match the bucket you created; service account (or your gcloud user) needs Storage write. |
-| Draft generation fails | `GROK_API_KEY` must be set and valid; check API logs. |
+| Draft generation fails | `ANTHROPIC_API_KEY` and/or `GROK_API_KEY` must be set for the selected provider; check API logs. |
 | 403 on `/tasks/*` | Request must include header `x-task-secret` with the same value as `TASK_SECRET` in the API `.env`. |
 
 For GCP permissions when running locally, use **Application Default Credentials**:

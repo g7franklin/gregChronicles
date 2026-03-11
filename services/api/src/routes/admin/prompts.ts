@@ -7,7 +7,7 @@ import { logger } from '../../lib/logger.js';
 import { getPlaceholders } from '../../lib/promptTemplate.js';
 import { renderUserPrompt } from '../../lib/promptTemplate.js';
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../../lib/defaultPrompt.js';
-import { generateNewsletterDraft } from '../../llm/grokClient.js';
+import { generateNewsletterDraft, isValidProvider, type LlmProvider, DEFAULT_PROVIDER } from '../../llm/index.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -18,6 +18,7 @@ const createSchema = z.object({
 
 const testSchema = z.object({
   systemPrompt: z.string(),
+  provider: z.enum(['claude', 'grok']).optional(),
 });
 
 const FAKE_MEMOS_JSON = JSON.stringify(
@@ -270,10 +271,14 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
       contextNewslettersJson: FAKE_NEWSLETTERS_JSON,
       styleGuidelines: '',
     });
-    const raw = await generateNewsletterDraft({
-      systemPrompt: parsed.data.systemPrompt,
-      userPrompt,
-    });
+    const testProvider: LlmProvider = parsed.data.provider ?? DEFAULT_PROVIDER;
+    const raw = await generateNewsletterDraft(
+      {
+        systemPrompt: parsed.data.systemPrompt,
+        userPrompt,
+      },
+      testProvider,
+    );
     let subject: string | null = null;
     let bodyMarkdown = raw;
     try {

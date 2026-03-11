@@ -1,6 +1,6 @@
 # Life Newsletter
 
-A complete monorepo for a **Life Newsletter** system: private admin site (capture memos, manage subscribers, review/approve drafts, edit prompts), public site (subscribe, archive, unsubscribe), and a GCP backend (Firestore, Cloud Storage, Cloud Run, Grok LLM, SendGrid, Twilio).
+A complete monorepo for a **Life Newsletter** system: private admin site (capture memos, manage subscribers, review/approve drafts, edit prompts), public site (subscribe, archive, unsubscribe), and a GCP backend (Firestore, Cloud Storage, Cloud Run, Claude/Grok LLM, SendGrid, Twilio).
 
 ## Features
 
@@ -19,7 +19,7 @@ A complete monorepo for a **Life Newsletter** system: private admin site (captur
   - Public endpoints: newsletters list/detail, subscribe, unsubscribe.
   - Secured tasks: `POST /tasks/generateWeeklyDraft` (Saturday), `POST /tasks/sendWeeklyNewsletter` (Sunday). Secured with `x-task-secret` header.
 - **Weekly automation**
-  - **Saturday night**: Generate draft from last 7 days of memos + last 5 newsletters; use **Grok** and the latest saved prompt from Prompt Editor; store draft as `pending_approval`.
+  - **Saturday night**: Generate draft from last 7 days of memos + last 5 newsletters; use **Claude or Grok** (selectable in admin) and the latest saved prompt from Prompt Editor; store draft as `pending_approval`.
   - **Sunday morning**: If an approved draft exists and is not sent, send email (SendGrid) and SMS (Twilio), create newsletter record for archive, mark draft sent.
 
 ## Repository structure
@@ -29,14 +29,14 @@ apps/
   admin-web/     # Next.js 14, Tailwind, Firebase Auth
   public-web/     # Next.js 14, Tailwind
 services/
-  api/            # Express TypeScript, Firestore, GCS, Grok, SendGrid, Twilio
+  api/            # Express TypeScript, Firestore, GCS, Claude/Grok, SendGrid, Twilio
 infra/            # gcloud deploy scripts + README
 ```
 
 ## Tech stack
 
 - **Apps**: Next.js 14, TypeScript, Tailwind CSS.
-- **API**: Node/TypeScript, Express, Firestore, Cloud Storage, Firebase Admin (auth), Grok (xAI) for newsletter generation, SendGrid, Twilio.
+- **API**: Node/TypeScript, Express, Firestore, Cloud Storage, Firebase Admin (auth), Claude (Anthropic) + Grok (xAI) for newsletter generation, SendGrid, Twilio.
 - **Infra**: Cloud Run, Secret Manager, Cloud Scheduler (or Pub/Sub) for Saturday/Sunday jobs.
 
 ## Local development
@@ -57,6 +57,7 @@ pnpm install
   - `GOOGLE_CLOUD_PROJECT` / `GCP_PROJECT`
   - `GCS_BUCKET`
   - `TASK_SECRET`
+  - `ANTHROPIC_API_KEY`
   - `GROK_API_KEY`
 - **Admin web**: Copy `apps/admin-web/.env.example` to `apps/admin-web/.env.local` and set Firebase config (`NEXT_PUBLIC_FIREBASE_*`) and `NEXT_PUBLIC_API_URL=http://localhost:8080`.
 - **Public web**: Copy `apps/public-web/.env.example` to `apps/public-web/.env.local` and set `NEXT_PUBLIC_API_URL=http://localhost:8080`.
@@ -90,7 +91,7 @@ pnpm dev:public
 
 ## Deploy (GCP)
 
-1. **One-time setup**: Enable APIs, create Firestore (Native), Storage bucket, secrets (TASK_SECRET, GROK_API_KEY, SENDGRID_API_KEY, TWILIO_*, UNSUBSCRIBE_SECRET), and add an admin user in `adminUsers`. See `infra/README.md`.
+1. **One-time setup**: Enable APIs, create Firestore (Native), Storage bucket, secrets (TASK_SECRET, ANTHROPIC_API_KEY, GROK_API_KEY, SENDGRID_API_KEY, TWILIO_*, UNSUBSCRIBE_SECRET), and add an admin user in `adminUsers`. See `infra/README.md`.
 2. **API**:
    ```bash
    cd infra && ./deploy-api.sh

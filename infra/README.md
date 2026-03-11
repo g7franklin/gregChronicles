@@ -51,6 +51,9 @@ Create secrets and add your values (first version):
 # Task auth (shared secret for Cloud Scheduler → Cloud Run)
 echo -n "your-random-task-secret" | gcloud secrets create TASK_SECRET --data-file=-
 
+# Anthropic (Claude) API key
+echo -n "your-anthropic-api-key" | gcloud secrets create ANTHROPIC_API_KEY --data-file=-
+
 # Grok (xAI) API key
 echo -n "your-grok-api-key" | gcloud secrets create GROK_API_KEY --data-file=-
 
@@ -154,6 +157,8 @@ Set via Cloud Run or in `deploy-api.sh`:
 - `GOOGLE_CLOUD_PROJECT` / `GCP_PROJECT`
 - `GCS_BUCKET`
 - `TASK_SECRET` (or mount from Secret Manager)
+- `ANTHROPIC_API_KEY` (from Secret Manager)
+- `ANTHROPIC_MODEL` (optional, default claude-sonnet-4-20250514)
 - `GROK_API_KEY` (from Secret Manager)
 - `GROK_MODEL` (optional, default grok-2-latest)
 - `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME`

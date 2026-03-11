@@ -6,7 +6,7 @@ import { AuthRequest } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
 import { runGenerateWeeklyDraft } from '../../jobs/generateWeeklyDraft.js';
 import { sendDraftById } from '../../jobs/sendWeeklyNewsletter.js';
-import { generateDraftEdit } from '../../llm/grokClient.js';
+import { generateDraftEdit, isValidProvider, type LlmProvider, DEFAULT_PROVIDER } from '../../llm/index.js';
 import { replaceGcsUrlsWithMediaProxy } from '../../lib/mediaUrls.js';
 import { getSundayOfWeekKey, getWeekKey } from '../../lib/weekKey.js';
 
@@ -20,6 +20,7 @@ const updateSchema = z.object({
 
 const chatSchema = z.object({
   message: z.string().min(1, 'Message is required'),
+  provider: z.enum(['claude', 'grok']).optional(),
 });
 
 const sendNowSchema = z.object({
@@ -31,7 +32,8 @@ const MANUAL_SEND_CONFIRMATION_PHRASE = 'I solemnly swear I am up to no good';
 
 /** Generate a new draft from the last 7 days of memos (same as Saturday job). Uses real memo content. */
 router.post('/generate', (req: AuthRequest, res: Response) => {
-  runGenerateWeeklyDraft()
+  const provider: LlmProvider = isValidProvider(req.body?.provider) ? req.body.provider : DEFAULT_PROVIDER;
+  runGenerateWeeklyDraft(provider)
     .then(({ draftId }) => {
       res.json({ ok: true, draftId });
     })
@@ -265,11 +267,15 @@ router.post('/:id/chat', async (req: AuthRequest, res: Response) => {
     }
     const currentSubject = data.subject ?? 'Weekly Update';
     const currentBody = data.bodyMarkdown ?? '';
-    const result = await generateDraftEdit({
-      currentSubject,
-      currentBodyMarkdown: currentBody,
-      userMessage: parsed.data.message,
-    });
+    const chatProvider: LlmProvider = parsed.data.provider ?? DEFAULT_PROVIDER;
+    const result = await generateDraftEdit(
+      {
+        currentSubject,
+        currentBodyMarkdown: currentBody,
+        userMessage: parsed.data.message,
+      },
+      chatProvider,
+    );
     await ref.update({ subject: result.subject, bodyMarkdown: result.bodyMarkdown });
     res.json({ subject: result.subject, bodyMarkdown: result.bodyMarkdown });
   } catch (err) {

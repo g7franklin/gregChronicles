@@ -35,6 +35,7 @@ export default function NewsletterPage() {
   const [sendNowLoading, setSendNowLoading] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
   const [editMode, setEditMode] = useState<'visual' | 'source'>('visual');
   const [editorVersion, setEditorVersion] = useState(0);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -140,7 +141,7 @@ export default function NewsletterPage() {
     setGenerating(true);
     setMessage(null);
     try {
-      const result = (await apiPost('/admin/drafts/generate')) as { draftId?: string };
+      const result = (await apiPost('/admin/drafts/generate', { provider: llmProvider })) as { draftId?: string };
       const draftId = result?.draftId;
       if (draftId) {
         const d = await apiGet<Draft>(`/admin/drafts/${draftId}`);
@@ -229,6 +230,7 @@ export default function NewsletterPage() {
       await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
       const result = await apiPost(`/admin/drafts/${draft.id}/chat`, {
         message: chatMessage.trim(),
+        provider: llmProvider,
       }) as { subject: string; bodyMarkdown: string };
       setSubject(result.subject);
       setBodyMarkdown(result.bodyMarkdown);
@@ -287,6 +289,34 @@ export default function NewsletterPage() {
           Generate a draft from your memos, edit it (by hand or with the agent), then save as ready
           for Sunday 6 AM or send now.
         </p>
+
+        <div className="flex items-center gap-3 mb-4">
+          <span className="text-sm font-medium text-slate-700">AI model:</span>
+          <div className="flex bg-slate-100 rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setLlmProvider('claude')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                llmProvider === 'claude'
+                  ? 'bg-white shadow-sm text-slate-800 font-medium'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Claude
+            </button>
+            <button
+              type="button"
+              onClick={() => setLlmProvider('grok')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                llmProvider === 'grok'
+                  ? 'bg-white shadow-sm text-slate-800 font-medium'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Grok
+            </button>
+          </div>
+        </div>
 
         {!draft ? (
           <div className="border border-slate-200 rounded-lg p-6 bg-slate-50">
