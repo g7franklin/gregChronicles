@@ -1,9 +1,8 @@
 import { Router, type IRouter, type Response } from 'express';
 import { z } from 'zod';
-import { getFirestore } from '../../db/firestore.js';
-import { COLLECTIONS } from '../../db/firestore.js';
+import { getFirestore, COLLECTIONS } from '../../db/firestore.js';
 import { AuthRequest } from '../../middleware/auth.js';
-import { logger } from '../../lib/logger.js';
+import { logger, toErrorMessage } from '../../lib/logger.js';
 import { runGenerateWeeklyDraft } from '../../jobs/generateWeeklyDraft.js';
 import { sendDraftById } from '../../jobs/sendWeeklyNewsletter.js';
 import { generateDraftEdit, isValidProvider, type LlmProvider, DEFAULT_PROVIDER } from '../../llm/index.js';
@@ -38,7 +37,7 @@ router.post('/generate', (req: AuthRequest, res: Response) => {
       res.json({ ok: true, draftId });
     })
     .catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       logger.error('POST /admin/drafts/generate failed', err);
       if (!res.headersSent) {
         res.status(500).json({
@@ -172,7 +171,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
       await ref.update(updates);
     }
     const updated = await ref.get();
-    res.json({ id: updated.id, ...updated.data() });
+    res.json(draftToJson(updated.id, updated.data() ?? {}));
   } catch (err) {
     logger.error('PATCH /admin/drafts/:id', err);
     res.status(500).json({ error: 'Failed to update draft' });
@@ -216,7 +215,7 @@ router.post('/:id/approve', async (req: AuthRequest, res: Response) => {
 
     await ref.update({ status: 'approved', approvedAt: new Date() });
     const updated = await ref.get();
-    res.json({ id: updated.id, ...updated.data() });
+    res.json(draftToJson(updated.id, updated.data() ?? {}));
   } catch (err) {
     logger.error('POST /admin/drafts/:id/approve', err);
     res.status(500).json({ error: 'Failed to approve draft' });
@@ -239,7 +238,7 @@ router.post('/:id/unapprove', async (req: AuthRequest, res: Response) => {
     }
     await ref.update({ status: 'pending_approval', approvedAt: null });
     const updated = await ref.get();
-    res.json({ id: updated.id, ...updated.data() });
+    res.json(draftToJson(updated.id, updated.data() ?? {}));
   } catch (err) {
     logger.error('POST /admin/drafts/:id/unapprove', err);
     res.status(500).json({ error: 'Failed to unapprove draft' });
@@ -280,7 +279,7 @@ router.post('/:id/chat', async (req: AuthRequest, res: Response) => {
     res.json({ subject: result.subject, bodyMarkdown: result.bodyMarkdown });
   } catch (err) {
     logger.error('POST /admin/drafts/:id/chat failed', err);
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Chat edit failed' });
+    res.status(500).json({ error: toErrorMessage(err) });
   }
 });
 

@@ -1,3 +1,7 @@
+export function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export const logger = {
   info: (msg: string, meta?: Record<string, unknown>) => {
     console.log(JSON.stringify({ level: 'info', msg, ...meta }));
@@ -9,7 +13,7 @@ export const logger = {
     console.error(JSON.stringify({
       level: 'error',
       msg,
-      error: err instanceof Error ? err.message : String(err),
+      error: toErrorMessage(err),
       ...meta,
     }));
   },

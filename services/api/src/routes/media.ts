@@ -1,8 +1,8 @@
-import { Router, type IRouter, type Request, type Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { getFileMetadata, createFileStream } from '../storage/gcs.js';
-import { logger } from '../lib/logger.js';
+import { logger, toErrorMessage } from '../lib/logger.js';
 
-const router: IRouter = Router();
+const router: ReturnType<typeof Router> = Router();
 
 /**
  * Media proxy: streams files from GCS with HTTP Range support.
@@ -48,7 +48,7 @@ router.get('*', async (req: Request, res: Response) => {
       createFileStream(path).pipe(res);
     }
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail = toErrorMessage(err);
     logger.warn('Media proxy failed', { path, error: detail });
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to serve media' });

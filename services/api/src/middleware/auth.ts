@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import admin from 'firebase-admin';
-import { getFirestore } from '../db/firestore.js';
-import { COLLECTIONS } from '../db/firestore.js';
+import { getFirestore, COLLECTIONS } from '../db/firestore.js';
 import { logger } from '../lib/logger.js';
 
 export interface AuthRequest extends Request {

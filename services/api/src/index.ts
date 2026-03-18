@@ -10,7 +10,7 @@ import promptsRouter from './routes/admin/prompts.js';
 import publicRouter from './routes/public.js';
 import tasksRouter from './routes/tasks.js';
 import mediaRouter from './routes/media.js';
-import { logger } from './lib/logger.js';
+import { logger, toErrorMessage } from './lib/logger.js';
 import { getProjectId } from './config.js';
 import { getFirestore } from './db/firestore.js';
 import { COLLECTIONS } from './db/firestore.js';
@@ -70,7 +70,7 @@ app.use('/media', mediaRouter);
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error('Unhandled error', err);
   if (res.headersSent) return;
-  const message = err instanceof Error ? err.message : String(err);
+  const message = toErrorMessage(err);
   try {
     res.status(500).json({
       error: 'Internal Server Error',

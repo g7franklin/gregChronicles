@@ -1,10 +1,10 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import crypto from 'crypto';
-import { getFirestore } from '../db/firestore.js';
-import { COLLECTIONS } from '../db/firestore.js';
+import { getFirestore, COLLECTIONS } from '../db/firestore.js';
 import { logger } from '../lib/logger.js';
 import { verifyUnsubscribeToken } from '../lib/unsubscribeToken.js';
+import { hashToken } from '../lib/crypto.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -14,10 +14,6 @@ const subscribeSchema = z.object({
   phone: z.string().optional(),
   smsConsent: z.boolean().optional(),
 });
-
-function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
 
 router.get('/newsletters', async (_req, res: Response) => {
   try {
@@ -165,12 +161,17 @@ router.post('/unsubscribe', async (req, res: Response) => {
 });
 
 router.get('/unsubscribe', async (req, res: Response) => {
-  const token = req.query.token as string | undefined;
-  if (!token) {
-    res.status(400).json({ error: 'Missing token' });
-    return;
+  try {
+    const token = req.query.token as string | undefined;
+    if (!token) {
+      res.status(400).json({ error: 'Missing token' });
+      return;
+    }
+    await unsubscribeByToken(token, res);
+  } catch (err) {
+    logger.error('GET /public/unsubscribe', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to unsubscribe' });
   }
-  await unsubscribeByToken(token, res);
 });
 
 export default router;

@@ -1,10 +1,10 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import crypto from 'crypto';
-import { getFirestore } from '../../db/firestore.js';
-import { COLLECTIONS } from '../../db/firestore.js';
+import { getFirestore, COLLECTIONS } from '../../db/firestore.js';
 import { AuthRequest } from '../../middleware/auth.js';
 import { logger } from '../../lib/logger.js';
+import { hashToken } from '../../lib/crypto.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -22,10 +22,6 @@ const updateSchema = z.object({
   smsConsent: z.boolean().optional(),
   status: z.enum(['active', 'unsubscribed']).optional(),
 });
-
-function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
 
 router.get('/export.csv', async (_req: AuthRequest, res: Response) => {
   try {

@@ -4,6 +4,12 @@ function getApiBase(): string {
   return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 }
 
+function buildUrl(path: string): string {
+  if (path.startsWith('http')) return path;
+  const base = getApiBase().replace(/\/$/, '');
+  return `${base}${path.startsWith('/') ? path : '/' + path}`;
+}
+
 async function getToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
   const { getAuthToken } = await import('./firebase');
@@ -16,9 +22,7 @@ async function fetchApi(path: string, init: RequestInit = {}): Promise<Response>
     ...(init.headers as Record<string, string>),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const base = getApiBase();
-  const url = path.startsWith('http') ? path : `${base.replace(/\/$/, '')}${path.startsWith('/') ? path : '/' + path}`;
-  return fetch(url, { ...init, headers });
+  return fetch(buildUrl(path), { ...init, headers });
 }
 
 function parseErrorResponse(text: string): string {
@@ -74,9 +78,7 @@ export async function apiPostFormData(path: string, formData: FormData): Promise
   const token = await getToken();
   const headers: HeadersInit = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const base = getApiBase();
-  const url = path.startsWith('http') ? path : `${base.replace(/\/$/, '')}${path.startsWith('/') ? path : '/' + path}`;
-  const res = await fetch(url, {
+  const res = await fetch(buildUrl(path), {
     method: 'POST',
     headers,
     body: formData,

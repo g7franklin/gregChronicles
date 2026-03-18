@@ -1,14 +1,13 @@
 import { createRequire } from 'module';
-import { Router, type IRouter, type Response } from 'express';
+import { Router, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { Timestamp } from '@google-cloud/firestore';
-import { getFirestore } from '../../db/firestore.js';
-import { COLLECTIONS } from '../../db/firestore.js';
+import { getFirestore, COLLECTIONS } from '../../db/firestore.js';
 import { uploadBuffer, getSignedUrl } from '../../storage/gcs.js';
 import { getWeekKey } from '../../lib/weekKey.js';
 import { AuthRequest } from '../../middleware/auth.js';
-import { logger } from '../../lib/logger.js';
+import { logger, toErrorMessage } from '../../lib/logger.js';
 
 const require = createRequire(import.meta.url);
 const heicConvert = require('heic-convert') as (opts: {
@@ -28,7 +27,7 @@ function isHeicOrHeif(file: { mimetype: string; originalname: string }): boolean
   );
 }
 
-const router: IRouter = Router();
+const router: ReturnType<typeof Router> = Router();
 
 function toJsonMemo(id: string, data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { id, ...data };
@@ -132,7 +131,7 @@ router.post(
               ext = 'jpg';
             } catch (err) {
               logger.warn('HEIC conversion failed, storing original', {
-                error: err instanceof Error ? err.message : String(err),
+                error: toErrorMessage(err),
               });
               ext = contentType.includes('heic') || contentType.includes('heif') ? 'heic' : 'jpg';
             }
@@ -182,7 +181,7 @@ router.post(
       res.status(201).json(toJsonMemo(memoId, doc as Record<string, unknown>));
     } catch (err) {
       logger.error('POST /admin/memos', err);
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       res.status(500).json({
         error: 'Failed to create memo',
         ...(process.env.NODE_ENV !== 'production' && { details: message }),
