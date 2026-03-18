@@ -2,6 +2,7 @@ import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
 import { getWeekKey, getMostRecentSunday, getSundayOfWeekKey } from '../lib/weekKey.js';
 import { renderUserPrompt, type PromptContext } from '../lib/promptTemplate.js';
+import { markdownBoldToHtml } from '../lib/emailFormat.js';
 import { getApiBaseUrl } from '../config.js';
 import { generateNewsletterDraft, type LlmProvider, DEFAULT_PROVIDER } from '../llm/index.js';
 import { logger } from '../lib/logger.js';
@@ -121,6 +122,8 @@ export async function runGenerateWeeklyDraft(provider: LlmProvider = DEFAULT_PRO
   } catch {
     logger.warn('LLM response was not JSON, using raw as body');
   }
+  // Normalize **bold** to <strong> so it renders in email and admin
+  bodyMarkdown = markdownBoldToHtml(bodyMarkdown);
   // Always use send date for subject (no "Week of" range)
   const subject = sendDate ? `The Greg Chronicle — ${sendDate}` : 'The Greg Chronicle — Weekly Update';
 

@@ -74,7 +74,9 @@ export default function NewsletterPage() {
           {newsletter.bodyHtml ? (
             <div
               className="newspaper-content [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"
-              dangerouslySetInnerHTML={{ __html: newsletter.bodyHtml }}
+              dangerouslySetInnerHTML={{
+                __html: newsletter.bodyHtml.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'),
+              }}
             />
           ) : newsletter.bodyMarkdown ? (
             <pre className="whitespace-pre-wrap font-sans text-stone-700 text-sm">

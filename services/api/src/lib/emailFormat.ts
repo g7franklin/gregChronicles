@@ -1,4 +1,12 @@
 /**
+ * Convert Markdown-style bold (**text**) to HTML <strong> so it renders correctly
+ * when the LLM outputs asterisks instead of tags.
+ */
+export function markdownBoldToHtml(html: string): string {
+  return html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+/**
  * Wrap newsletter body HTML in a proper email document with DOCTYPE,
  * charset, viewport meta, and a centered container. Improves rendering
  * across email clients and avoids spam-filter penalties for bare HTML.

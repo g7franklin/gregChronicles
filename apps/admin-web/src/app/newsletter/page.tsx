@@ -104,6 +104,11 @@ export default function NewsletterPage() {
    * An IntersectionObserver later upgrades preload to "metadata" when the
    * video scrolls into view, so the first frame shows without blocking page load.
    */
+  /** Convert **text** to <strong> so LLM output renders bold in preview. */
+  function markdownBoldToHtml(html: string): string {
+    return html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  }
+
   function sanitizeVideoHtml(html: string): string {
     return html.replace(/<video\b([^>]*)>/gi, (_match, attrs: string) => {
       let cleaned = attrs
@@ -476,7 +481,7 @@ export default function NewsletterPage() {
                         (() => {
                           const isHtml = /^\s*</.test(bodyMarkdown) || bodyMarkdown.includes('<div') || bodyMarkdown.includes('<p') || bodyMarkdown.includes('<table');
                           const content = isHtml
-                            ? sanitizeVideoHtml(bodyMarkdown)
+                            ? sanitizeVideoHtml(markdownBoldToHtml(bodyMarkdown))
                             : `<div style="white-space:pre-wrap;font-family:sans-serif;color:#44403c;font-size:0.875rem">${bodyMarkdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
                           return (
                             <div
@@ -537,7 +542,7 @@ export default function NewsletterPage() {
                                 </pre>
                               );
                             }
-                            const html = sanitizeVideoHtml(raw);
+                            const html = sanitizeVideoHtml(markdownBoldToHtml(raw));
                             return (
                               <div
                                 className="newspaper-content max-w-[600px] mx-auto [&_a]:text-stone-700 [&_a]:underline [&_a:hover]:text-stone-900"

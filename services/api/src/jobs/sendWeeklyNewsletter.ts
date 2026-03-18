@@ -6,7 +6,7 @@ import { getApiBaseUrl } from '../config.js';
 import { createUnsubscribeToken } from '../lib/unsubscribeToken.js';
 import { replaceGcsUrlsWithMediaProxy } from '../lib/mediaUrls.js';
 import { getWeekKey } from '../lib/weekKey.js';
-import { htmlToPlainText, wrapHtmlEmail } from '../lib/emailFormat.js';
+import { htmlToPlainText, wrapHtmlEmail, markdownBoldToHtml } from '../lib/emailFormat.js';
 
 async function getSecret(name: string): Promise<string> {
   if (process.env.NODE_ENV !== 'production') {
@@ -74,6 +74,7 @@ export async function sendDraftById(
   }
   if (!bodyHtml) bodyHtml = '<p>No content.</p>';
 
+  bodyHtml = markdownBoldToHtml(bodyHtml);
   bodyHtml = replaceGcsUrlsWithMediaProxy(bodyHtml);
 
   if (sendGridKey && subsSnap.docs.length > 0) {

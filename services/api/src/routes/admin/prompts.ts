@@ -7,6 +7,7 @@ import { logger } from '../../lib/logger.js';
 import { getPlaceholders } from '../../lib/promptTemplate.js';
 import { renderUserPrompt } from '../../lib/promptTemplate.js';
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../../lib/defaultPrompt.js';
+import { markdownBoldToHtml } from '../../lib/emailFormat.js';
 import { generateNewsletterDraft, isValidProvider, type LlmProvider, DEFAULT_PROVIDER } from '../../llm/index.js';
 
 const router: ReturnType<typeof Router> = Router();
@@ -291,13 +292,13 @@ router.post('/test', async (req: AuthRequest, res: Response) => {
     let bodyHtml: string;
     const looksLikeHtml = /^\s*</.test(bodyMarkdown) || bodyMarkdown.includes('<div') || bodyMarkdown.includes('<p ');
     if (looksLikeHtml) {
-      bodyHtml = bodyMarkdown;
+      bodyHtml = markdownBoldToHtml(bodyMarkdown);
     } else {
       try {
         const { marked } = await import('marked');
-        bodyHtml = (await marked.parse(bodyMarkdown)) as string;
+        bodyHtml = markdownBoldToHtml((await marked.parse(bodyMarkdown)) as string);
       } catch {
-        bodyHtml = bodyMarkdown;
+        bodyHtml = markdownBoldToHtml(bodyMarkdown);
       }
     }
     res.json({ raw, subject, bodyMarkdown, bodyHtml });
