@@ -305,7 +305,10 @@ router.post('/:id/send-now', async (req: AuthRequest, res: Response) => {
     res.json({ ok: true, publicSlug: result.publicSlug });
   } catch (err) {
     logger.error('POST /admin/drafts/:id/send-now failed', err);
-    res.status(500).json({ error: 'Send failed' });
+    res.status(500).json({
+      error: 'Send failed',
+      details: toErrorMessage(err),
+    });
   }
 });
 

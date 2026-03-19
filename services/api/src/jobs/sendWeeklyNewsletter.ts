@@ -1,7 +1,7 @@
 import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
 import type { Firestore } from '@google-cloud/firestore';
-import { logger } from '../lib/logger.js';
+import { logger, toErrorMessage } from '../lib/logger.js';
 import { getApiBaseUrl } from '../config.js';
 import { createUnsubscribeToken } from '../lib/unsubscribeToken.js';
 import { replaceGcsUrlsWithMediaProxy } from '../lib/mediaUrls.js';
@@ -118,22 +118,26 @@ export async function sendDraftById(
   }
 
   if (twilioAccountSid && twilioAuthToken && twilioFrom) {
-    const twilio = (await import('twilio')).default;
-    const client = twilio(twilioAccountSid, twilioAuthToken);
-    const smsEligible = subsSnap.docs.filter((d) => d.data().smsConsent && d.data().phone);
-    logger.info('Sending SMS notifications', { eligible: smsEligible.length, total: subsSnap.size });
-    for (const subDoc of subsSnap.docs) {
-      const sub = subDoc.data();
-      if (!sub.smsConsent || !sub.phone) continue;
-      try {
-        await client.messages.create({
-          body: `${draft.subject ?? 'Weekly Newsletter'}\n${archiveUrl}`,
-          from: twilioFrom,
-          to: sub.phone,
-        });
-      } catch (err) {
-        logger.error('Twilio send failed', err, { phone: sub.phone });
+    try {
+      const twilio = (await import('twilio')).default;
+      const client = twilio(twilioAccountSid, twilioAuthToken);
+      const smsEligible = subsSnap.docs.filter((d) => d.data().smsConsent && d.data().phone);
+      logger.info('Sending SMS notifications', { eligible: smsEligible.length, total: subsSnap.size });
+      for (const subDoc of smsEligible) {
+        const sub = subDoc.data();
+        try {
+          await client.messages.create({
+            body: `${draft.subject ?? 'Weekly Newsletter'}\n${archiveUrl}`,
+            from: twilioFrom,
+            to: sub.phone,
+          });
+        } catch (err) {
+          logger.error('Twilio send failed', err, { phone: sub.phone });
+        }
       }
+    } catch (err) {
+      // Don't fail newsletter delivery if Twilio is misconfigured.
+      logger.warn('SMS skipped — Twilio initialization failed', { error: toErrorMessage(err) });
     }
   } else if (!twilioFrom) {
     logger.warn('SMS skipped — TWILIO_FROM env var is not set');
