@@ -29,6 +29,17 @@ export default function MemosPage() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const formatRecordedAt = (iso: string): string =>
+    new Date(iso).toLocaleString(undefined, {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
   const loadMemos = useCallback(() => {
     const params = new URLSearchParams();
     if (query) params.set('query', query);
@@ -205,10 +216,10 @@ export default function MemosPage() {
             {memos.map((m) => (
               <li key={m.id} className="border rounded-lg p-3 bg-white">
                 <Link href={`/memos/${m.id}`} className="font-medium text-sky-600 hover:underline">
-                  {m.title || m.id}
+                  {formatRecordedAt(m.createdAt)}
                 </Link>
                 <p className="text-sm text-slate-500 mt-1">
-                  {new Date(m.createdAt).toLocaleString()}
+                  {m.title || 'Untitled'}
                   {m.attachments?.length ? ` · ${m.attachments.length} attachment(s)` : ''}
                 </p>
                 <p className="text-slate-700 mt-1 line-clamp-2">

@@ -18,5 +18,6 @@ export const COLLECTIONS = {
   NEWSLETTERS: 'newsletters',
   SUBSCRIBERS: 'subscribers',
   PROMPT_VERSIONS: 'promptVersions',
+  CAPTURE_TRACKERS: 'captureTrackers',
   ADMIN_USERS: 'adminUsers',
 } as const;

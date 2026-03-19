@@ -72,7 +72,15 @@ export default function MemoDetailPage() {
         </Link>
         <h1 className="text-2xl font-semibold">{memo.title || 'Memo'}</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {new Date(memo.createdAt).toLocaleString()}
+          {new Date(memo.createdAt).toLocaleString(undefined, {
+            weekday: 'short',
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })}
         </p>
         {memo.attachmentSummary && (
           <p className="text-slate-600 mt-2">{memo.attachmentSummary}</p>

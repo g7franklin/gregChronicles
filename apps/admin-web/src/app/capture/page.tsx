@@ -2,9 +2,38 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import AdminLayout from '@/components/AdminLayout';
-import { apiPostFormData } from '@/lib/api';
+import { apiGet, apiPatch, apiPostFormData } from '@/lib/api';
 
 type AttachmentFile = { file: File; id: string; preview?: string };
+
+type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+type DaysState = Record<DayKey, boolean>;
+
+const DEFAULT_DAYS: DaysState = {
+  mon: false,
+  tue: false,
+  wed: false,
+  thu: false,
+  fri: false,
+  sat: false,
+  sun: false,
+};
+
+const DAY_ORDER: Array<{ key: DayKey; label: string }> = [
+  { key: 'mon', label: 'Mon' },
+  { key: 'tue', label: 'Tue' },
+  { key: 'wed', label: 'Wed' },
+  { key: 'thu', label: 'Thu' },
+  { key: 'fri', label: 'Fri' },
+  { key: 'sat', label: 'Sat' },
+  { key: 'sun', label: 'Sun' },
+];
+
+function getTodayKey(now: Date): DayKey {
+  // JS: getDay() => 0 (Sun) ... 6 (Sat)
+  const d = now.getDay();
+  return d === 0 ? 'sun' : (['mon', 'tue', 'wed', 'thu', 'fri', 'sat'][d - 1] as DayKey);
+}
 
 export default function CapturePage() {
   const [transcript, setTranscript] = useState('');
@@ -13,6 +42,11 @@ export default function CapturePage() {
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const [trackerWeekKey, setTrackerWeekKey] = useState<string | null>(null);
+  const [trackerDays, setTrackerDays] = useState<DaysState>({ ...DEFAULT_DAYS });
+  const [trackerLoading, setTrackerLoading] = useState(true);
+  const [trackerSaving, setTrackerSaving] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<unknown>(null);
@@ -25,6 +59,29 @@ export default function CapturePage() {
       });
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTrackerLoading(true);
+    apiGet<{ weekKey: string; days: DaysState }>('/admin/capture-tracker/current')
+      .then((r) => {
+        if (cancelled) return;
+        setTrackerWeekKey(r.weekKey);
+        setTrackerDays(r.days);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTrackerWeekKey(null);
+        setTrackerDays({ ...DEFAULT_DAYS });
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setTrackerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const toggleRecording = useCallback(() => {
@@ -120,6 +177,17 @@ export default function CapturePage() {
       });
       await apiPostFormData('/admin/memos', form);
       setMessage({ text: 'Saved!', ok: true });
+
+      // Mark "today" in the weekly tracker so it’s easy to see what days you already updated.
+      const todayKey = getTodayKey(new Date());
+      const nextDays: DaysState = { ...trackerDays, [todayKey]: true };
+      setTrackerDays(nextDays);
+      try {
+        await apiPatch('/admin/capture-tracker/current', { days: nextDays });
+      } catch {
+        // If tracker update fails, keep the memo saved anyway.
+      }
+
       clearAll();
     } catch (e) {
       setMessage({ text: e instanceof Error ? e.message : String(e), ok: false });
@@ -215,6 +283,45 @@ export default function CapturePage() {
             </svg>
             Add photos or videos
           </button>
+        </div>
+
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-medium text-slate-800">This week - update days</h2>
+            {trackerWeekKey && <span className="text-xs text-slate-500">{trackerWeekKey}</span>}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {DAY_ORDER.map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-2 text-sm text-slate-700 select-none">
+                <input
+                  type="checkbox"
+                  checked={trackerDays[key]}
+                  disabled={trackerLoading || trackerSaving}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    const prevChecked = trackerDays[key];
+                    const nextDays: DaysState = { ...trackerDays, [key]: checked };
+                    setTrackerDays(nextDays);
+                    setTrackerSaving(true);
+                    try {
+                      await apiPatch('/admin/capture-tracker/current', { days: nextDays });
+                    } catch (err) {
+                      setMessage({
+                        text: err instanceof Error ? err.message : String(err),
+                        ok: false,
+                      });
+                      // Roll back on failure so UI doesn't lie.
+                      setTrackerDays((prev) => ({ ...prev, [key]: prevChecked }));
+                    } finally {
+                      setTrackerSaving(false);
+                    }
+                  }}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">Boxes reset automatically at the start of each week.</p>
         </div>
 
         <div className="flex gap-3 pb-4">

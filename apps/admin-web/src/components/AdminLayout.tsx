@@ -20,12 +20,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
 
   useEffect(() => {
-    const auth = getAuth();
-    const unsub = auth.onAuthStateChanged((user) => {
+    try {
+      const auth = getAuth();
+      const unsub = auth.onAuthStateChanged((user) => {
+        setReady(true);
+        if (!user) router.replace('/login');
+      });
+      return () => unsub();
+    } catch (err) {
+      // If Firebase initialization fails synchronously, we'd otherwise get stuck on "Loading…".
+      // Redirecting to login avoids an infinite spinner and keeps the app protected.
+      // eslint-disable-next-line no-console
+      console.error('AdminLayout auth init failed', err);
       setReady(true);
-      if (!user) router.replace('/login');
-    });
-    return () => unsub();
+      router.replace('/login');
+    }
   }, [router]);
 
   if (!ready) {
