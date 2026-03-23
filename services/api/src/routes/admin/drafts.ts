@@ -29,10 +29,12 @@ const sendNowSchema = z.object({
 /** Exact phrase required to manually send (case-sensitive). */
 const MANUAL_SEND_CONFIRMATION_PHRASE = 'I solemnly swear I am up to no good';
 
-/** Generate a new draft from the last 7 days of memos (same as Saturday job). Uses real memo content. */
+/** Generate a new draft from memos. Optionally accepts startDate and endDate (ISO strings) to control the memo date range. */
 router.post('/generate', (req: AuthRequest, res: Response) => {
   const provider: LlmProvider = isValidProvider(req.body?.provider) ? req.body.provider : DEFAULT_PROVIDER;
-  runGenerateWeeklyDraft(provider)
+  const startDate = req.body?.startDate ? new Date(req.body.startDate as string) : undefined;
+  const endDate = req.body?.endDate ? new Date(req.body.endDate as string) : undefined;
+  runGenerateWeeklyDraft(provider, { startDate, endDate })
     .then(({ draftId }) => {
       res.json({ ok: true, draftId });
     })

@@ -23,11 +23,15 @@ interface MemoForContext {
   }>;
 }
 
-export async function runGenerateWeeklyDraft(provider: LlmProvider = DEFAULT_PROVIDER): Promise<{ draftId: string }> {
+export async function runGenerateWeeklyDraft(
+  provider: LlmProvider = DEFAULT_PROVIDER,
+  options?: { startDate?: Date; endDate?: Date },
+): Promise<{ draftId: string }> {
   const db = getFirestore();
   const now = new Date();
   const weekKey = getWeekKey(now);
-  const startDate = getMostRecentSunday(now);
+  const startDate = options?.startDate ?? getMostRecentSunday(now);
+  const endDate = options?.endDate ?? now;
 
   const activePromptSnap = await db
     .collection(COLLECTIONS.PROMPT_VERSIONS)
@@ -46,7 +50,7 @@ export async function runGenerateWeeklyDraft(provider: LlmProvider = DEFAULT_PRO
   const memosSnap = await db
     .collection(COLLECTIONS.MEMOS)
     .where('createdAt', '>=', startDate)
-    .where('createdAt', '<=', now)
+    .where('createdAt', '<=', endDate)
     .orderBy('createdAt', 'asc')
     .get();
 
@@ -96,7 +100,7 @@ export async function runGenerateWeeklyDraft(provider: LlmProvider = DEFAULT_PRO
     };
   });
 
-  const weekRange = `${startDate.toISOString().slice(0, 10)} to ${now.toISOString().slice(0, 10)}`;
+  const weekRange = `${startDate.toISOString().slice(0, 10)} to ${endDate.toISOString().slice(0, 10)}`;
   const sendSunday = getSundayOfWeekKey(weekKey);
   const sendDate = sendSunday
     ? sendSunday.toLocaleDateString('en-US', {

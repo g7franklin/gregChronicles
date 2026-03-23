@@ -36,6 +36,12 @@ export default function NewsletterPage() {
   const [authReady, setAuthReady] = useState(false);
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
+  const [generateStartDate, setGenerateStartDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [generateEndDate, setGenerateEndDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [editMode, setEditMode] = useState<'visual' | 'source'>('visual');
   const [editorVersion, setEditorVersion] = useState(0);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -146,7 +152,11 @@ export default function NewsletterPage() {
     setGenerating(true);
     setMessage(null);
     try {
-      const result = (await apiPost('/admin/drafts/generate', { provider: llmProvider })) as { draftId?: string };
+      const result = (await apiPost('/admin/drafts/generate', {
+        provider: llmProvider,
+        startDate: generateStartDate ? new Date(generateStartDate).toISOString() : undefined,
+        endDate: generateEndDate ? new Date(generateEndDate + 'T23:59:59').toISOString() : undefined,
+      })) as { draftId?: string };
       const draftId = result?.draftId;
       if (draftId) {
         const d = await apiGet<Draft>(`/admin/drafts/${draftId}`);
@@ -326,9 +336,28 @@ export default function NewsletterPage() {
         {!draft ? (
           <div className="border border-slate-200 rounded-lg p-6 bg-slate-50">
             <p className="text-slate-700 mb-4">
-              No draft yet. Generate one from the last 7 days of memos (same content the Saturday job
-              uses).
+              No draft yet. Generate one from your memos. Adjust the date range to include any memos you want.
             </p>
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-slate-700 whitespace-nowrap">From</label>
+                <input
+                  type="date"
+                  value={generateStartDate}
+                  onChange={(e) => setGenerateStartDate(e.target.value)}
+                  className="border rounded-lg px-2 py-1 text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-slate-700 whitespace-nowrap">To</label>
+                <input
+                  type="date"
+                  value={generateEndDate}
+                  onChange={(e) => setGenerateEndDate(e.target.value)}
+                  className="border rounded-lg px-2 py-1 text-sm"
+                />
+              </div>
+            </div>
             <button
               onClick={generateDraft}
               disabled={generating}
@@ -655,9 +684,29 @@ export default function NewsletterPage() {
             <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-lg font-semibold text-slate-800 mb-2">Generate new draft?</h2>
               <p className="text-slate-600 mb-4">
-                This will create a new draft from your latest memos. Your current draft will still
+                This will create a new draft from your memos. Your current draft will still
                 exist but will no longer be shown as the current week&apos;s draft.
               </p>
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-slate-700 whitespace-nowrap">From</label>
+                  <input
+                    type="date"
+                    value={generateStartDate}
+                    onChange={(e) => setGenerateStartDate(e.target.value)}
+                    className="border rounded-lg px-2 py-1 text-sm"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-slate-700 whitespace-nowrap">To</label>
+                  <input
+                    type="date"
+                    value={generateEndDate}
+                    onChange={(e) => setGenerateEndDate(e.target.value)}
+                    className="border rounded-lg px-2 py-1 text-sm"
+                  />
+                </div>
+              </div>
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => setShowGenerateConfirm(false)}
