@@ -205,7 +205,7 @@ export default function NewsletterPage() {
       const currentBody = getBodyMarkdown();
       await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
       await apiPost(`/admin/drafts/${draft.id}/approve`);
-      setMessage('Marked ready for Sunday. It will be sent Sunday at 6 AM.');
+      setMessage('Marked as ready to send.');
       const updated = await apiGet<Draft>(`/admin/drafts/${draft.id}`);
       setDraft(updated);
       setSubject(updated.subject ?? '');
@@ -224,7 +224,7 @@ export default function NewsletterPage() {
     setMessage(null);
     try {
       await apiPost(`/admin/drafts/${draft.id}/unapprove`);
-      setMessage('Draft set back to pending approval. It will not be sent Sunday.');
+      setMessage('Draft set back to pending.');
       const updated = await apiGet<Draft>(`/admin/drafts/${draft.id}`);
       setDraft(updated);
       setSubject(updated.subject ?? '');
@@ -301,8 +301,7 @@ export default function NewsletterPage() {
       <div className="max-w-4xl mx-auto">
         <h1 className="text-2xl font-semibold mb-2">Newsletter Draft</h1>
         <p className="text-slate-600 mb-4">
-          Generate a draft from your memos, edit it (by hand or with the agent), then save as ready
-          for Sunday 6 AM or send now.
+          Generate a draft from your memos, edit it (by hand or with the agent), then send when ready.
         </p>
 
         <div className="flex items-center gap-3 mb-4">
@@ -372,13 +371,10 @@ export default function NewsletterPage() {
             {draft.status === 'approved' ? (
               <div className="mb-4 rounded-lg border-2 border-green-600 bg-green-50 px-4 py-3">
                 <p className="text-base font-semibold text-green-800">
-                  ✓ Approved for Sunday — This draft will be sent on the planned date.
-                </p>
-                <p className="mt-1 text-sm font-medium text-green-800">
-                  Planned send: {draft.plannedSendLabel ?? `Week ${draft.weekKey} (Sunday 6 AM)`}
+                  ✓ Ready to send
                 </p>
                 <p className="mt-0.5 text-sm text-green-700">
-                  Week: {draft.weekKey} · Generated: {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : '—'}
+                  Generated: {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : '—'}
                 </p>
               </div>
             ) : draft.status === 'sent' ? (
@@ -391,16 +387,35 @@ export default function NewsletterPage() {
             ) : (
               <div className="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 px-4 py-3">
                 <p className="text-base font-semibold text-amber-900">
-                  Pending approval — This draft will not be sent until you approve it.
-                </p>
-                <p className="mt-1 text-sm font-medium text-amber-900">
-                  If approved, planned send: {draft.plannedSendLabel ?? `Week ${draft.weekKey} (Sunday 6 AM)`}
+                  Draft pending — review and send when ready.
                 </p>
                 <p className="mt-0.5 text-sm text-amber-800">
-                  Week: {draft.weekKey} · Generated: {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : '—'}
+                  Generated: {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : '—'}
                 </p>
               </div>
             )}
+
+            <div className="flex flex-wrap items-center gap-3 mb-3">
+              <span className="text-sm font-medium text-slate-700">Memo date range:</span>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-slate-600 whitespace-nowrap">From</label>
+                <input
+                  type="date"
+                  value={generateStartDate}
+                  onChange={(e) => setGenerateStartDate(e.target.value)}
+                  className="border rounded-lg px-2 py-1 text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-slate-600 whitespace-nowrap">To</label>
+                <input
+                  type="date"
+                  value={generateEndDate}
+                  onChange={(e) => setGenerateEndDate(e.target.value)}
+                  className="border rounded-lg px-2 py-1 text-sm"
+                />
+              </div>
+            </div>
 
             <div className="flex flex-wrap gap-2 mb-4">
               <button
@@ -417,30 +432,12 @@ export default function NewsletterPage() {
               >
                 Save edits
               </button>
-              {draft.status !== 'sent' && draft.status !== 'approved' && (
-                <button
-                  onClick={approve}
-                  disabled={saving}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg disabled:opacity-50"
-                >
-                  Save as ready for Sunday
-                </button>
-              )}
-              {draft.status === 'approved' && (
-                <button
-                  onClick={unapprove}
-                  disabled={saving}
-                  className="px-4 py-2 bg-slate-500 text-white rounded-lg hover:bg-slate-600 disabled:opacity-50"
-                >
-                  Unapprove (back to pending)
-                </button>
-              )}
               {draft.status !== 'sent' && (
                 <button
                   onClick={openSendNow}
                   className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
                 >
-                  Send now (manual)
+                  Send now
                 </button>
               )}
             </div>
@@ -684,29 +681,9 @@ export default function NewsletterPage() {
             <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-lg font-semibold text-slate-800 mb-2">Generate new draft?</h2>
               <p className="text-slate-600 mb-4">
-                This will create a new draft from your memos. Your current draft will still
+                This will create a new draft from your memos using the selected date range. Your current draft will still
                 exist but will no longer be shown as the current week&apos;s draft.
               </p>
-              <div className="flex flex-wrap items-center gap-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-slate-700 whitespace-nowrap">From</label>
-                  <input
-                    type="date"
-                    value={generateStartDate}
-                    onChange={(e) => setGenerateStartDate(e.target.value)}
-                    className="border rounded-lg px-2 py-1 text-sm"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-slate-700 whitespace-nowrap">To</label>
-                  <input
-                    type="date"
-                    value={generateEndDate}
-                    onChange={(e) => setGenerateEndDate(e.target.value)}
-                    className="border rounded-lg px-2 py-1 text-sm"
-                  />
-                </div>
-              </div>
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => setShowGenerateConfirm(false)}

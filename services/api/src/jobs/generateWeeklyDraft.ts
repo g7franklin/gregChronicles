@@ -1,6 +1,6 @@
 import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
-import { getWeekKey, getMostRecentSunday, getSundayOfWeekKey } from '../lib/weekKey.js';
+import { getWeekKey, getMostRecentSunday } from '../lib/weekKey.js';
 import { renderUserPrompt, type PromptContext } from '../lib/promptTemplate.js';
 import { markdownBoldToHtml } from '../lib/emailFormat.js';
 import { getApiBaseUrl } from '../config.js';
@@ -101,15 +101,12 @@ export async function runGenerateWeeklyDraft(
   });
 
   const weekRange = `${startDate.toISOString().slice(0, 10)} to ${endDate.toISOString().slice(0, 10)}`;
-  const sendSunday = getSundayOfWeekKey(weekKey);
-  const sendDate = sendSunday
-    ? sendSunday.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
-    : weekKey;
+  const sendDate = now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
   const context: PromptContext = {
     weekRange,
     sendDate,
@@ -128,8 +125,7 @@ export async function runGenerateWeeklyDraft(
   }
   // Normalize **bold** to <strong> so it renders in email and admin
   bodyMarkdown = markdownBoldToHtml(bodyMarkdown);
-  // Always use send date for subject (no "Week of" range)
-  const subject = sendDate ? `The Greg Chronicle — ${sendDate}` : 'The Greg Chronicle — Weekly Update';
+  const subject = `The Greg Chronicle — ${sendDate}`;
 
   const approvedSnap = await db
     .collection(COLLECTIONS.DRAFTS)
