@@ -7,6 +7,8 @@ PROJECT_ID=${PROJECT_ID:-$(gcloud config get-value project)}
 REGION=${REGION:-us-central1}
 BUCKET_NAME=${GCS_BUCKET:-life-newsletter-media-${PROJECT_ID}}
 SERVICE_NAME=${SERVICE_NAME:-life-newsletter-api}
+PROJECT_NUMBER=${PROJECT_NUMBER:-$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')}
+GCS_SA_EMAIL=${GCS_SERVICE_ACCOUNT_EMAIL:-${PROJECT_NUMBER}-compute@developer.gserviceaccount.com}
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/services/api"
 pnpm install
@@ -24,7 +26,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --region "$REGION" \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},FIRESTORE_DATABASE_ID=gregchronicles,ANTHROPIC_MODEL=claude-sonnet-4-20250514,GROK_MODEL=grok-3,API_BASE_URL=${API_BASE},PUBLIC_WEB_URL=${PUBLIC_WEB},SENDGRID_FROM=newsletter@gregchronicles.com,SENDGRID_FROM_NAME=The Greg Chronicle,TWILIO_FROM=+18882441852" \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},GCS_SERVICE_ACCOUNT_EMAIL=${GCS_SA_EMAIL},FIRESTORE_DATABASE_ID=gregchronicles,ANTHROPIC_MODEL=claude-sonnet-4-20250514,GROK_MODEL=grok-3,API_BASE_URL=${API_BASE},PUBLIC_WEB_URL=${PUBLIC_WEB},SENDGRID_FROM=newsletter@gregchronicles.com,SENDGRID_FROM_NAME=The Greg Chronicle,TWILIO_FROM=+18882441852" \
   --set-secrets "TASK_SECRET=TASK_SECRET:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GROK_API_KEY=GROK_API_KEY:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,TWILIO_ACCOUNT_SID=TWILIO_ACCOUNT_SID:latest,TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest,UNSUBSCRIBE_SECRET=UNSUBSCRIBE_SECRET:latest" \
   --project "$PROJECT_ID"
 

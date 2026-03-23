@@ -2,9 +2,23 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import AdminLayout from '@/components/AdminLayout';
-import { apiGet, apiPatch, apiPostFormData } from '@/lib/api';
+import { apiGet, apiPatch, apiPost } from '@/lib/api';
 
 type AttachmentFile = { file: File; id: string; preview?: string };
+type UploadedAttachment = {
+  attachmentId: string;
+  gcsPath: string;
+  originalName: string;
+  contentType: string;
+  sizeBytes: number;
+  type: 'audio' | 'video' | 'image';
+};
+
+function getAttachmentType(file: File): 'audio' | 'video' | 'image' {
+  if (file.type.startsWith('audio/')) return 'audio';
+  if (file.type.startsWith('video/')) return 'video';
+  return 'image';
+}
 
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 type DaysState = Record<DayKey, boolean>;
@@ -41,6 +55,7 @@ export default function CapturePage() {
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
 
   const [trackerWeekKey, setTrackerWeekKey] = useState<string | null>(null);
@@ -165,27 +180,72 @@ export default function CapturePage() {
 
   const submit = async () => {
     setSubmitting(true);
+    setUploadProgress(null);
     setMessage(null);
     try {
-      const form = new FormData();
-      form.append('transcript', transcript);
+      // Collect all files: recorded audio first, then photo/video attachments
+      const filesToUpload: File[] = [];
       if (recordedBlob) {
-        form.append('recordedAudio', recordedBlob, 'recording.webm');
+        filesToUpload.push(new File([recordedBlob], 'recording.webm', { type: 'audio/webm' }));
       }
-      attachments.forEach((a) => {
-        form.append('attachments', a.file, a.file.name);
+      for (const a of attachments) {
+        filesToUpload.push(a.file);
+      }
+
+      let memoIdForSave: string | undefined;
+      const uploadedAttachments: UploadedAttachment[] = [];
+
+      if (filesToUpload.length > 0) {
+        // Step 1: Ask the API for a signed GCS upload URL for each file
+        const result = await apiPost('/admin/memos/upload-urls', {
+          files: filesToUpload.map((f) => ({
+            filename: f.name,
+            contentType: f.type || 'application/octet-stream',
+            size: f.size,
+          })),
+        }) as { memoId: string; uploads: Array<{ attachmentId: string; gcsPath: string; uploadUrl: string }> };
+
+        memoIdForSave = result.memoId;
+
+        // Step 2: Upload each file directly to GCS — API server never touches the bytes
+        for (let i = 0; i < filesToUpload.length; i++) {
+          setUploadProgress({ current: i + 1, total: filesToUpload.length });
+          const file = filesToUpload[i];
+          const { attachmentId, gcsPath, uploadUrl } = result.uploads[i];
+          const uploadRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file,
+          });
+          if (!uploadRes.ok) throw new Error(`Upload failed for ${file.name} (${uploadRes.status})`);
+          uploadedAttachments.push({
+            attachmentId,
+            gcsPath,
+            originalName: file.name,
+            contentType: file.type || 'application/octet-stream',
+            sizeBytes: file.size,
+            type: getAttachmentType(file),
+          });
+        }
+      }
+
+      // Step 3: Save the memo record (just metadata — no file bytes)
+      await apiPost('/admin/memos', {
+        ...(memoIdForSave ? { memoId: memoIdForSave } : {}),
+        transcript,
+        attachments: uploadedAttachments,
       });
-      await apiPostFormData('/admin/memos', form);
+
       setMessage({ text: 'Saved!', ok: true });
 
-      // Mark "today" in the weekly tracker so it’s easy to see what days you already updated.
+      // Mark "today" in the weekly tracker
       const todayKey = getTodayKey(new Date());
       const nextDays: DaysState = { ...trackerDays, [todayKey]: true };
       setTrackerDays(nextDays);
       try {
         await apiPatch('/admin/capture-tracker/current', { days: nextDays });
       } catch {
-        // If tracker update fails, keep the memo saved anyway.
+        // tracker failing doesn't affect the memo
       }
 
       clearAll();
@@ -193,6 +253,7 @@ export default function CapturePage() {
       setMessage({ text: e instanceof Error ? e.message : String(e), ok: false });
     } finally {
       setSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -331,7 +392,11 @@ export default function CapturePage() {
             className="flex-1 py-3 bg-slate-800 text-white rounded-xl text-base font-medium
                        disabled:opacity-40 active:bg-slate-900 transition-colors"
           >
-            {submitting ? 'Saving...' : 'Save'}
+            {submitting
+              ? uploadProgress
+                ? `Uploading ${uploadProgress.current} of ${uploadProgress.total}…`
+                : 'Saving…'
+              : 'Save'}
           </button>
           {(transcript || attachments.length > 0 || recordedBlob) && (
             <button

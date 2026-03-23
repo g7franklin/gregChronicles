@@ -6,6 +6,7 @@ import { markdownBoldToHtml } from '../lib/emailFormat.js';
 import { getApiBaseUrl } from '../config.js';
 import { generateNewsletterDraft, type LlmProvider, DEFAULT_PROVIDER } from '../llm/index.js';
 import { logger } from '../lib/logger.js';
+import { replaceSignedUrlPlaceholders } from '../lib/mediaUrls.js';
 
 interface MemoForContext {
   id: string;
@@ -21,6 +22,14 @@ interface MemoForContext {
     sizeBytes: number;
     signedUrl?: string;
   }>;
+}
+
+function toRenderableMediaUrl(apiBase: string, gcsPath: string): string {
+  const lower = gcsPath.toLowerCase();
+  const base = `${apiBase}/media/${gcsPath}`;
+  // Serve HEIC/HEIF through a .jpg alias so clients that dislike .heic URLs still render correctly.
+  if (lower.endsWith('.heic') || lower.endsWith('.heif')) return `${base}.jpg`;
+  return base;
 }
 
 export async function runGenerateWeeklyDraft(
@@ -78,7 +87,7 @@ export async function runGenerateWeeklyDraft(
         originalName: a.originalName,
         contentType: a.contentType,
         sizeBytes: a.sizeBytes,
-        signedUrl: `${apiBase}/media/${a.gcsPath}`,
+        signedUrl: toRenderableMediaUrl(apiBase, a.gcsPath),
       })),
     });
   }
@@ -125,6 +134,12 @@ export async function runGenerateWeeklyDraft(
   }
   // Normalize **bold** to <strong> so it renders in email and admin
   bodyMarkdown = markdownBoldToHtml(bodyMarkdown);
+  const availableAttachmentUrls = memosWithUrls.flatMap((m) =>
+    m.attachments
+      .map((a) => a.signedUrl)
+      .filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
+  );
+  bodyMarkdown = replaceSignedUrlPlaceholders(bodyMarkdown, availableAttachmentUrls);
   const subject = `The Greg Chronicle — ${sendDate}`;
 
   const approvedSnap = await db

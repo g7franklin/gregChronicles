@@ -1,31 +1,11 @@
-import { createRequire } from 'module';
 import { Router, type Response } from 'express';
-import multer from 'multer';
 import { z } from 'zod';
 import { Timestamp } from '@google-cloud/firestore';
 import { getFirestore, COLLECTIONS } from '../../db/firestore.js';
-import { uploadBuffer, getSignedUrl } from '../../storage/gcs.js';
+import { getSignedUploadUrl, getSignedUrl } from '../../storage/gcs.js';
 import { getWeekKey } from '../../lib/weekKey.js';
 import { AuthRequest } from '../../middleware/auth.js';
 import { logger, toErrorMessage } from '../../lib/logger.js';
-
-const require = createRequire(import.meta.url);
-const heicConvert = require('heic-convert') as (opts: {
-  buffer: Buffer;
-  format: 'JPEG' | 'PNG';
-  quality?: number;
-}) => Promise<Buffer>;
-
-function isHeicOrHeif(file: { mimetype: string; originalname: string }): boolean {
-  const m = (file.mimetype || '').toLowerCase();
-  const name = (file.originalname || '').toLowerCase();
-  return (
-    m === 'image/heic' ||
-    m === 'image/heif' ||
-    name.endsWith('.heic') ||
-    name.endsWith('.heif')
-  );
-}
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -42,153 +22,94 @@ function toJsonMemo(id: string, data: Record<string, unknown>): Record<string, u
   return out;
 }
 
+const attachmentInputSchema = z.object({
+  attachmentId: z.string(),
+  gcsPath: z.string(),
+  originalName: z.string(),
+  contentType: z.string(),
+  sizeBytes: z.number(),
+  type: z.enum(['audio', 'video', 'image']),
+});
+
 const memoCreateSchema = z.object({
+  memoId: z.string().optional(),
   transcript: z.string(),
   title: z.string().optional(),
   attachmentSummary: z.string().optional(),
+  attachments: z.array(attachmentInputSchema).optional(),
 });
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 200 * 1024 * 1024 },
-});
-
-router.post(
-  '/',
-  upload.fields([
-    { name: 'recordedAudio', maxCount: 1 },
-    { name: 'attachments', maxCount: 20 },
-  ]),
-  async (req: AuthRequest, res: Response) => {
-    try {
-      const uid = req.uid!;
-      const body = req.body as Record<string, string>;
-      const parsed = memoCreateSchema.safeParse({
-        transcript: body.transcript ?? '',
-        title: body.title,
-        attachmentSummary: body.attachmentSummary,
-      });
-      if (!parsed.success) {
-        res.status(400).json({ error: 'Invalid body', details: parsed.error.flatten() });
-        return;
-      }
-
-      const files = req.files as Record<string, Express.Multer.File[]>;
-      const recorded = files?.recordedAudio?.[0];
-      const attachments = files?.attachments ?? [];
-
-      const now = new Date();
-      const weekKey = getWeekKey(now);
-      const memoId = getFirestore().collection(COLLECTIONS.MEMOS).doc().id;
-
-      const attachmentsList: Array<{
-        id: string;
-        type: 'audio' | 'video' | 'image';
-        originalName: string;
-        gcsPath: string;
-        contentType: string;
-        sizeBytes: number;
-        durationSec?: number;
-        createdAt: Timestamp;
-      }> = [];
-
-      const allowedAudio = ['audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/mp4'];
-      const allowedVideo = ['video/mp4', 'video/quicktime', 'video/webm'];
-      const allowedImage = [
-        'image/jpeg',
-        'image/png',
-        'image/webp',
-        'image/gif',
-        'image/heic',
-        'image/heif',
-      ];
-
-      const processFile = async (file: Express.Multer.File): Promise<void> => {
-        const contentType = file.mimetype;
-        const isVideo = allowedVideo.includes(contentType) || contentType.startsWith('video/');
-        const isImage =
-          allowedImage.includes(contentType) ||
-          contentType.startsWith('image/') ||
-          isHeicOrHeif(file);
-        const isAudio = allowedAudio.includes(contentType) || contentType.startsWith('audio/');
-        let type: 'audio' | 'video' | 'image' = 'audio';
-        let ext = 'mp3';
-        let buffer = file.buffer;
-        let finalContentType = contentType;
-        if (isVideo) {
-          type = 'video';
-          ext = contentType.includes('quicktime') ? 'mov' : 'mp4';
-        } else if (isImage) {
-          type = 'image';
-          if (isHeicOrHeif(file)) {
-            try {
-              buffer = await heicConvert({
-                buffer: file.buffer,
-                format: 'JPEG',
-                quality: 0.92,
-              });
-              finalContentType = 'image/jpeg';
-              ext = 'jpg';
-            } catch (err) {
-              logger.warn('HEIC conversion failed, storing original', {
-                error: toErrorMessage(err),
-              });
-              ext = contentType.includes('heic') || contentType.includes('heif') ? 'heic' : 'jpg';
-            }
-          } else {
-            if (contentType.includes('png')) ext = 'png';
-            else if (contentType.includes('webp')) ext = 'webp';
-            else if (contentType.includes('gif')) ext = 'gif';
-            else ext = 'jpg';
-          }
-        } else if (isAudio) {
-          type = 'audio';
-          ext = 'mp3';
-        }
-        const attId = getFirestore().collection(COLLECTIONS.MEMOS).doc().id;
-        const gcsPath = `memos/${memoId}/${attId}.${ext}`;
-        await uploadBuffer(gcsPath, buffer, finalContentType);
-        attachmentsList.push({
-          id: attId,
-          type,
-          originalName: file.originalname,
-          gcsPath,
-          contentType: finalContentType,
-          sizeBytes: buffer.length,
-          createdAt: Timestamp.fromDate(now),
-        });
-      };
-
-      if (recorded) {
-        await processFile(recorded);
-      }
-      for (const f of attachments) {
-        await processFile(f);
-      }
-
-      const doc = {
-        createdAt: now,
-        transcript: parsed.data.transcript,
-        title: parsed.data.title ?? null,
-        weekKey,
-        createdByUid: uid,
-        attachments: attachmentsList,
-        attachmentSummary: parsed.data.attachmentSummary ?? null,
-      };
-
-      await getFirestore().collection(COLLECTIONS.MEMOS).doc(memoId).set(doc);
-
-      res.status(201).json(toJsonMemo(memoId, doc as Record<string, unknown>));
-    } catch (err) {
-      logger.error('POST /admin/memos', err);
-      const message = toErrorMessage(err);
-      res.status(500).json({
-        error: 'Failed to create memo',
-        ...(process.env.NODE_ENV !== 'production' && { details: message }),
-      });
+/** Step 1: generate signed GCS upload URLs for each file. Returns memoId + per-file upload URLs. */
+router.post('/upload-urls', async (req: AuthRequest, res: Response) => {
+  try {
+    const files = req.body?.files as Array<{ filename: string; contentType: string; size: number }>;
+    if (!Array.isArray(files) || files.length === 0) {
+      res.status(400).json({ error: 'files array is required' });
+      return;
     }
+    if (files.length > 30) {
+      res.status(400).json({ error: 'Maximum 30 files per upload' });
+      return;
+    }
+    const db = getFirestore();
+    const memoId = db.collection(COLLECTIONS.MEMOS).doc().id;
+    const uploads = await Promise.all(
+      files.map(async ({ filename, contentType }) => {
+        const attachmentId = db.collection(COLLECTIONS.MEMOS).doc().id;
+        const ext = filename.includes('.') ? filename.split('.').pop()!.toLowerCase().slice(0, 5) : 'bin';
+        const gcsPath = `memos/${memoId}/${attachmentId}.${ext}`;
+        const uploadUrl = await getSignedUploadUrl(gcsPath, contentType || 'application/octet-stream');
+        return { attachmentId, gcsPath, uploadUrl };
+      }),
+    );
+    res.json({ memoId, uploads });
+  } catch (err) {
+    logger.error('POST /admin/memos/upload-urls', err);
+    res.status(500).json({ error: 'Failed to generate upload URLs', details: toErrorMessage(err) });
   }
-);
+});
+
+/** Step 2: save the memo record. Files must already be in GCS from the upload-urls step. */
+router.post('/', async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.uid!;
+    const parsed = memoCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid body', details: parsed.error.flatten() });
+      return;
+    }
+    const now = new Date();
+    const weekKey = getWeekKey(now);
+    const db = getFirestore();
+    const memoId = parsed.data.memoId ?? db.collection(COLLECTIONS.MEMOS).doc().id;
+    const attachmentsList = (parsed.data.attachments ?? []).map((a) => ({
+      id: a.attachmentId,
+      type: a.type,
+      originalName: a.originalName,
+      gcsPath: a.gcsPath,
+      contentType: a.contentType,
+      sizeBytes: a.sizeBytes,
+      createdAt: Timestamp.fromDate(now),
+    }));
+    const doc = {
+      createdAt: now,
+      transcript: parsed.data.transcript,
+      title: parsed.data.title ?? null,
+      weekKey,
+      createdByUid: uid,
+      attachments: attachmentsList,
+      attachmentSummary: parsed.data.attachmentSummary ?? null,
+    };
+    await db.collection(COLLECTIONS.MEMOS).doc(memoId).set(doc);
+    res.status(201).json(toJsonMemo(memoId, doc as Record<string, unknown>));
+  } catch (err) {
+    logger.error('POST /admin/memos', err);
+    res.status(500).json({
+      error: 'Failed to create memo',
+      ...(process.env.NODE_ENV !== 'production' && { details: toErrorMessage(err) }),
+    });
+  }
+});
 
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
