@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm run --parallel dev",
+    "dev:reset": "bash ./scripts/dev-reset.sh",
     "dev:api": "pnpm --filter api run dev",
     "dev:admin": "pnpm --filter admin-web run dev",
     "dev:public": "pnpm --filter public-web run dev",

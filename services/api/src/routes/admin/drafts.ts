@@ -8,6 +8,7 @@ import { sendDraftById } from '../../jobs/sendWeeklyNewsletter.js';
 import { generateDraftEdit, isValidProvider, type LlmProvider, DEFAULT_PROVIDER } from '../../llm/index.js';
 import { replaceGcsUrlsWithMediaProxy } from '../../lib/mediaUrls.js';
 import { getSundayOfWeekKey, getWeekKey } from '../../lib/weekKey.js';
+import { getApiBaseUrl } from '../../config.js';
 
 const router: IRouter = Router();
 
@@ -28,6 +29,12 @@ const sendNowSchema = z.object({
 
 /** Exact phrase required to manually send (case-sensitive). */
 const MANUAL_SEND_CONFIRMATION_PHRASE = 'I solemnly swear I am up to no good';
+
+function toRenderableMediaUrl(apiBase: string, gcsPath: string): string {
+  const base = `${apiBase}/media/${gcsPath}`;
+  const lower = gcsPath.toLowerCase();
+  return lower.endsWith('.heic') || lower.endsWith('.heif') ? `${base}.jpg` : base;
+}
 
 /** Generate a new draft from memos. Optionally accepts startDate and endDate (ISO strings) to control the memo date range. */
 router.post('/generate', (req: AuthRequest, res: Response) => {
@@ -147,6 +154,68 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   } catch (err) {
     logger.error('GET /admin/drafts/:id', err);
     res.status(500).json({ error: 'Failed to get draft' });
+  }
+});
+
+/** List media candidates (photos/videos/audio) available for this draft so UI can add/swap media. */
+router.get('/:id/media-candidates', async (req: AuthRequest, res: Response) => {
+  try {
+    const db = getFirestore();
+    const draftDoc = await db.collection(COLLECTIONS.DRAFTS).doc(req.params.id).get();
+    if (!draftDoc.exists) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    const draft = draftDoc.data() ?? {};
+    const apiBase = getApiBaseUrl().replace(/\/$/, '');
+    const memoIds = ((draft.memoIds ?? []) as unknown[]).filter((x): x is string => typeof x === 'string');
+    const candidates: Array<{
+      memoId: string;
+      attachmentId: string;
+      type: 'audio' | 'video' | 'image';
+      originalName: string;
+      contentType: string;
+      sizeBytes: number;
+      createdAt: string | null;
+      url: string;
+    }> = [];
+
+    const collectFromMemoDoc = (memoId: string, data: Record<string, unknown>) => {
+      const attachments = (data.attachments ?? []) as Array<{
+        id?: string;
+        type?: 'audio' | 'video' | 'image';
+        originalName?: string;
+        gcsPath?: string;
+        contentType?: string;
+        sizeBytes?: number;
+        createdAt?: { toDate?: () => Date };
+      }>;
+      for (const a of attachments) {
+        if (!a.gcsPath || !a.id || !a.type) continue;
+        candidates.push({
+          memoId,
+          attachmentId: a.id,
+          type: a.type,
+          originalName: a.originalName ?? 'attachment',
+          contentType: a.contentType ?? 'application/octet-stream',
+          sizeBytes: Number(a.sizeBytes ?? 0),
+          createdAt: a.createdAt?.toDate?.()?.toISOString?.() ?? null,
+          url: toRenderableMediaUrl(apiBase, a.gcsPath),
+        });
+      }
+    };
+
+    if (memoIds.length > 0) {
+      const snaps = await Promise.all(memoIds.map((memoId) => db.collection(COLLECTIONS.MEMOS).doc(memoId).get()));
+      snaps.forEach((snap) => {
+        if (snap.exists) collectFromMemoDoc(snap.id, snap.data() as Record<string, unknown>);
+      });
+    }
+
+    res.json({ candidates });
+  } catch (err) {
+    logger.error('GET /admin/drafts/:id/media-candidates failed', err);
+    res.status(500).json({ error: 'Failed to load media candidates', details: toErrorMessage(err) });
   }
 });
 

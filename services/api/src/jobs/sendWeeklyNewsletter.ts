@@ -32,6 +32,137 @@ function slugify(str: string): string {
     .replace(/^-|-$/g, '');
 }
 
+function styleNewsletterMedia(html: string): string {
+  const mediaTagRe = /(<img\b[^>]*>|<video\b[^>]*>[\s\S]*?<\/video>)/gi;
+  const escapeHtml = (s: string): string =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const isFilenameLikeCaption = (value: string): boolean => {
+    const v = value.trim();
+    if (!v) return true;
+    if (/\.(jpe?g|png|gif|webp|heic|heif|mov|mp4|m4v|webm)$/i.test(v)) return true;
+    if (/^(img|dsc|pxl|video|vid)[-_ ]?\d+/i.test(v)) return true;
+    const withoutPunct = v.replace(/[\s._-]/g, '');
+    return withoutPunct.length > 0 && /^[a-z]+\d+$/i.test(withoutPunct);
+  };
+  const toDescriptiveCaption = (raw: string, mediaType: 'photo' | 'video'): string => {
+    const cleaned = raw
+      .replace(/\.[a-z0-9]+$/i, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned || isFilenameLikeCaption(raw) || isFilenameLikeCaption(cleaned)) {
+      return mediaType === 'video' ? 'Video from this week' : 'Photo from this week';
+    }
+    return cleaned;
+  };
+  const altFromImg = (tag: string): string => {
+    const m = tag.match(/\salt=["']([^"']*)["']/i);
+    return (m?.[1] ?? '').trim();
+  };
+  let mediaCount = 0;
+  const nextFigureStyle = (): string => {
+    const align = mediaCount % 2 === 0 ? 'right' : 'left';
+    mediaCount++;
+    return align === 'right'
+      ? 'float:right;clear:right;margin:4px 0 10px 12px;width:170px;max-width:40%;'
+      : 'float:left;clear:left;margin:4px 12px 10px 0;width:170px;max-width:40%;';
+  };
+  const figcaptionStyle = 'margin-top:4px;font-size:11px;line-height:1.3;color:#64748b;font-style:italic;';
+  const mediaStyle = 'display:block;width:100%;height:auto;border-radius:4px;';
+  const normalizeMediaTag = (tag: string): string => {
+    if (tag.toLowerCase().startsWith('<video')) {
+      let cleaned = tag
+        .replace(/\s*(autoplay|loop)\b/gi, '')
+        .replace(/\s*preload=["'][^"']*["']/gi, '')
+        .replace(/\sstyle=["'][^"']*["']/gi, '');
+      if (!/controls/i.test(cleaned)) cleaned = cleaned.replace('<video', '<video controls');
+      if (!/playsinline/i.test(cleaned)) cleaned = cleaned.replace('<video', '<video playsinline');
+      return cleaned.replace('<video', `<video preload="auto" style="${mediaStyle}"`);
+    }
+    return tag.replace(/\sstyle=["'][^"']*["']/gi, '').replace('<img', `<img style="${mediaStyle}"`);
+  };
+  const renderFigure = (tag: string): string => {
+    const figureStyle = nextFigureStyle();
+    const caption = escapeHtml(
+      toDescriptiveCaption(altFromImg(tag), tag.toLowerCase().startsWith('<video') ? 'video' : 'photo')
+    );
+    const media = normalizeMediaTag(tag);
+    return `<figure style="${figureStyle}">${media}<figcaption style="${figcaptionStyle}">${caption}</figcaption></figure>`;
+  };
+
+  const mergeAdjacentCaptionParagraphs = (input: string): string => {
+    let out = input;
+    const captionMergeRe =
+      /<figure\b([^>]*)>([\s\S]*?)<figcaption\b([^>]*)>([\s\S]*?)<\/figcaption>([\s\S]*?)<\/figure>(?:\s*<p\b[^>]*>\s*(?:&nbsp;)?\s*<\/p>)*\s*<p\b([^>]*)>([\s\S]*?)<\/p>/gi;
+    for (let i = 0; i < 4; i++) {
+      out = out.replace(
+        captionMergeRe,
+        (_m, figAttrs: string, beforeCap: string, capAttrs: string, oldCap: string, afterCap: string, pAttrs: string, pText: string) => {
+          const plain = pText.replace(/<[^>]+>/g, '').trim();
+          const looksLikeCaption = /font-style\s*:\s*italic/i.test(pAttrs) || plain.length <= 180;
+          if (!looksLikeCaption || !plain) {
+            return `<figure${figAttrs}>${beforeCap}<figcaption${capAttrs}>${oldCap}</figcaption>${afterCap}</figure><p${pAttrs}>${pText}</p>`;
+          }
+          const nextCaption = escapeHtml(plain);
+          return `<figure${figAttrs}>${beforeCap}<figcaption${capAttrs}>${nextCaption}</figcaption>${afterCap}</figure>`;
+        }
+      );
+    }
+    return out;
+  };
+  const forceCaptionUnderFigure = (input: string): string => {
+    const trailingCaptionRe =
+      /(<figure\b[^>]*>[\s\S]*?<figcaption\b[^>]*>)([\s\S]*?)(<\/figcaption>[\s\S]*?<\/figure>)(?:\s*<p\b[^>]*>\s*(?:&nbsp;)?\s*<\/p>)*\s*<p\b([^>]*)>([\s\S]*?)<\/p>/gi;
+    return input.replace(trailingCaptionRe, (_m, openCap: string, oldCap: string, closeFig: string, pAttrs: string, pHtml: string) => {
+      const plain = pHtml.replace(/<[^>]+>/g, '').trim();
+      const isCaptionStyle = /font-style\s*:\s*italic/i.test(pAttrs) || /font-size\s*:\s*12px/i.test(pAttrs);
+      const captionishText = plain.length > 0 && plain.length <= 220;
+      if (!isCaptionStyle && !captionishText) {
+        return `${openCap}${oldCap}${closeFig}<p${pAttrs}>${pHtml}</p>`;
+      }
+      return `${openCap}${escapeHtml(plain)}</figcaption>${closeFig}`;
+    });
+  };
+
+  const transformed = html.replace(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi, (_full, attrs: string, inner: string) => {
+    const parts = inner.split(mediaTagRe);
+    if (parts.length === 1) return `<p${attrs}>${inner}</p>`;
+    let out = '';
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i] ?? '';
+      if (i % 2 === 0) {
+        const txt = part.trim();
+        if (txt) out += `<p${attrs}>${part}</p>`;
+      } else {
+        out += renderFigure(part);
+      }
+    }
+    return out;
+  });
+
+  const merged = mergeAdjacentCaptionParagraphs(transformed);
+  const figureBlocks: string[] = [];
+  const withPlaceholders = merged.replace(/<figure\b[\s\S]*?<\/figure>/gi, (block: string) => {
+    const idx = figureBlocks.push(block) - 1;
+    return `__FIG_BLOCK_${idx}__`;
+  });
+
+  const wrappedStandalone = withPlaceholders.replace(mediaTagRe, (tag: string) => renderFigure(tag));
+
+  const restored = wrappedStandalone.replace(/__FIG_BLOCK_(\d+)__/g, (_m, idxStr: string) => {
+    const block = figureBlocks[Number(idxStr)] ?? '';
+    const mediaMatch = block.match(mediaTagRe);
+    if (!mediaMatch) return block;
+    const mediaTag = mediaMatch[0];
+    const rawCaption = block.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/i)?.[1] ?? altFromImg(mediaTag);
+    const caption = escapeHtml(
+      toDescriptiveCaption(rawCaption.replace(/<[^>]+>/g, '').trim(), mediaTag.toLowerCase().startsWith('<video') ? 'video' : 'photo')
+    );
+    return `<figure style="${nextFigureStyle()}">${normalizeMediaTag(mediaTag)}<figcaption style="${figcaptionStyle}">${caption}</figcaption></figure>`;
+  });
+  return forceCaptionUnderFigure(restored);
+}
+
 /** Send a specific draft by ID (used by Sunday job and manual send-now). */
 export async function sendDraftById(
   draftId: string,
@@ -76,6 +207,7 @@ export async function sendDraftById(
 
   bodyHtml = markdownBoldToHtml(bodyHtml);
   bodyHtml = replaceGcsUrlsWithMediaProxy(bodyHtml);
+  bodyHtml = styleNewsletterMedia(bodyHtml);
 
   if (sendGridKey && subsSnap.docs.length > 0) {
     const sg = (await import('@sendgrid/mail')).default;
