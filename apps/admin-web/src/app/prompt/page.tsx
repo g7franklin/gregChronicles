@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import AdminLayout from '@/components/AdminLayout';
+import { getAuth } from '@/lib/firebase';
 import { apiGet, apiPost } from '@/lib/api';
 
-type ActivePrompt = {
-  id: string | null;
+type LatestPrompt = {
+  id: string;
   systemPrompt: string;
-  notes?: string;
-  isDefault?: boolean;
+  createdAt?: string;
 };
 
 type TestResult = {
@@ -20,29 +20,60 @@ type TestResult = {
 
 export default function PromptPage() {
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('grok');
   const [message, setMessage] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
-  const load = () => {
-    setLoading(true);
-    apiGet<ActivePrompt>('/admin/prompts/active')
-      .then((active) => {
-        setSystemPrompt(active.systemPrompt ?? '');
-        setNotes(active.notes ?? '');
+  const load = useCallback((opts?: { mode?: 'full' | 'quiet' }) => {
+    const quiet = opts?.mode === 'quiet';
+    if (!quiet) {
+      setLoading(true);
+      setMessage(null);
+      setSuccessNotice(null);
+    }
+    return apiGet<LatestPrompt>('/admin/prompts/latest')
+      .then((latest) => {
+        setSystemPrompt(typeof latest.systemPrompt === 'string' ? latest.systemPrompt : '');
       })
-      .finally(() => setLoading(false));
-  };
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('No prompt versions yet')) {
+          setSystemPrompt('');
+          return;
+        }
+        setMessage(msg);
+      })
+      .finally(() => {
+        if (!quiet) setLoading(false);
+      });
+  }, []);
+
+  // Wait for Firebase to restore the session before calling the API (otherwise no Bearer token is sent).
+  useEffect(() => {
+    const auth = getAuth();
+    const unsub = auth.onAuthStateChanged((user) => {
+      if (user) setAuthReady(true);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
-    load();
-  }, []);
+    if (!authReady) return;
+    void load();
+  }, [authReady, load]);
+
+  useEffect(() => {
+    if (!successNotice) return;
+    const id = window.setTimeout(() => setSuccessNotice(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [successNotice]);
 
   useEffect(() => {
     const iframe = previewIframeRef.current;
@@ -61,25 +92,11 @@ export default function PromptPage() {
     e.preventDefault();
     setSaving(true);
     setMessage(null);
+    setSuccessNotice(null);
     try {
-      await apiPost('/admin/prompts', { systemPrompt, notes });
-      setMessage('Saved and set as active.');
-      load();
-    } catch (e) {
-      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const resetDefault = async () => {
-    if (!confirm('Replace current prompt with the default?')) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await apiPost('/admin/prompts/reset-default');
-      setMessage('Reset to default.');
-      load();
+      await apiPost('/admin/prompts', { systemPrompt });
+      await load({ mode: 'quiet' });
+      setSuccessNotice('Prompt saved. It will be used the next time you generate a draft.');
     } catch (e) {
       setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -114,8 +131,24 @@ export default function PromptPage() {
       <div className="max-w-4xl mx-auto">
         <h1 className="text-2xl font-semibold mb-4">Prompt Editor</h1>
         <p className="text-slate-600 mb-4">
-          Edit the system prompt. The Saturday draft job uses the active prompt with a fixed user template (memos + context). Save to set as active.
+          Edit the system prompt here only—nothing is loaded from the codebase. The editor always shows your most recently
+          saved version. Draft generation uses that latest save (plus a fixed memo/context template on the server).
         </p>
+        {successNotice && (
+          <div
+            className="fixed top-4 left-1/2 z-50 max-w-md -translate-x-1/2 rounded-lg bg-slate-900 px-4 py-2.5 text-center text-sm text-white shadow-lg"
+            role="status"
+            aria-live="polite"
+          >
+            {successNotice}
+          </div>
+        )}
+        {message && (
+          <div className="mb-4 p-4 rounded-lg bg-red-50 border border-red-200 text-red-900 text-sm" role="alert">
+            {message}
+          </div>
+        )}
+
         <form onSubmit={save} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">System prompt</label>
@@ -126,32 +159,15 @@ export default function PromptPage() {
               className="w-full border rounded-lg p-2 font-mono text-sm"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Notes (optional)</label>
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full border rounded-lg p-2"
-            />
-          </div>
           <div className="flex gap-2">
             <button
               type="submit"
               disabled={saving}
               className="px-4 py-2 bg-slate-800 text-white rounded-lg disabled:opacity-50"
             >
-              Save & set active
-            </button>
-            <button
-              type="button"
-              onClick={resetDefault}
-              disabled={saving}
-              className="px-4 py-2 bg-slate-500 text-white rounded-lg disabled:opacity-50"
-            >
-              Reset to default
+              Save new version
             </button>
           </div>
-          {message && <p className="text-sm text-slate-600">{message}</p>}
         </form>
 
         <div className="mt-8 border-t pt-6">
@@ -164,17 +180,6 @@ export default function PromptPage() {
             <div className="flex bg-slate-100 rounded-lg p-0.5">
               <button
                 type="button"
-                onClick={() => setLlmProvider('claude')}
-                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  llmProvider === 'claude'
-                    ? 'bg-white shadow-sm text-slate-800 font-medium'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                Claude
-              </button>
-              <button
-                type="button"
                 onClick={() => setLlmProvider('grok')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                   llmProvider === 'grok'
@@ -183,6 +188,17 @@ export default function PromptPage() {
                 }`}
               >
                 Grok
+              </button>
+              <button
+                type="button"
+                onClick={() => setLlmProvider('claude')}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  llmProvider === 'claude'
+                    ? 'bg-white shadow-sm text-slate-800 font-medium'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Claude
               </button>
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { Timestamp } from '@google-cloud/firestore';
 import { getFirestore } from '../db/firestore.js';
 import { COLLECTIONS } from '../db/firestore.js';
 import { getWeekKey, getMostRecentSunday } from '../lib/weekKey.js';
@@ -7,6 +8,7 @@ import { getApiBaseUrl } from '../config.js';
 import { generateNewsletterDraft, type LlmProvider, DEFAULT_PROVIDER } from '../llm/index.js';
 import { logger } from '../lib/logger.js';
 import { replaceSignedUrlPlaceholders } from '../lib/mediaUrls.js';
+import { getLatestPromptVersionDoc } from '../lib/getLatestPromptVersion.js';
 
 interface MemoForContext {
   id: string;
@@ -42,19 +44,31 @@ export async function runGenerateWeeklyDraft(
   const startDate = options?.startDate ?? getMostRecentSunday(now);
   const endDate = options?.endDate ?? now;
 
-  const activePromptSnap = await db
-    .collection(COLLECTIONS.PROMPT_VERSIONS)
-    .where('isActive', '==', true)
-    .limit(1)
-    .get();
+  const promptColl = db.collection(COLLECTIONS.PROMPT_VERSIONS);
+  const promptDoc = await getLatestPromptVersionDoc(
+    async () => (await promptColl.orderBy('createdAt', 'desc').limit(1).get()).docs,
+    async () => (await promptColl.limit(200).get()).docs,
+  );
 
-  const systemPrompt = activePromptSnap.empty
-    ? (await import('../lib/defaultPrompt.js')).DEFAULT_SYSTEM_PROMPT
-    : activePromptSnap.docs[0].data().systemPrompt;
-  const userPromptTemplate = activePromptSnap.empty
-    ? (await import('../lib/defaultPrompt.js')).DEFAULT_USER_PROMPT_TEMPLATE
-    : activePromptSnap.docs[0].data().userPromptTemplate;
-  const usedPromptVersionId = activePromptSnap.empty ? null : activePromptSnap.docs[0].id;
+  if (!promptDoc) {
+    throw new Error(
+      'No newsletter prompt is saved yet. Open the admin Prompt page, paste your system prompt, and save once.',
+    );
+  }
+  const promptData = promptDoc.data();
+  const systemPromptRaw = promptData.systemPrompt;
+  if (typeof systemPromptRaw !== 'string' || !systemPromptRaw.trim()) {
+    throw new Error(
+      'Latest saved prompt has no system text. Open the admin Prompt page and save a non-empty prompt.',
+    );
+  }
+  const systemPrompt = systemPromptRaw;
+  const storedTemplate = promptData.userPromptTemplate as string | undefined;
+  const userPromptTemplate =
+    typeof storedTemplate === 'string' && storedTemplate.trim().length > 0
+      ? storedTemplate
+      : (await import('../lib/defaultPrompt.js')).DEFAULT_USER_PROMPT_TEMPLATE;
+  const usedPromptVersionId = promptDoc.id;
 
   const memosSnap = await db
     .collection(COLLECTIONS.MEMOS)
@@ -141,6 +155,7 @@ export async function runGenerateWeeklyDraft(
   );
   bodyMarkdown = replaceSignedUrlPlaceholders(bodyMarkdown, availableAttachmentUrls);
   const subject = `The Greg Chronicle — ${sendDate}`;
+  const defaultDraftName = now.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
   const approvedSnap = await db
     .collection(COLLECTIONS.DRAFTS)
@@ -169,12 +184,15 @@ export async function runGenerateWeeklyDraft(
     generatedAt: now,
     approvedAt: null,
     sentAt: null,
+    name: defaultDraftName,
     subject,
     bodyMarkdown,
     bodyHtml: null,
     memoIds: memosSnap.docs.map((d) => d.id),
     contextNewsletterIds: contextNewsletters.map((c) => c.id),
     usedPromptVersionId,
+    memoRangeStart: Timestamp.fromDate(startDate),
+    memoRangeEnd: Timestamp.fromDate(endDate),
   });
 
   logger.info('Weekly draft generated', { draftId: draftRef.id, weekKey });

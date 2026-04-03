@@ -1,3 +1,4 @@
+import { Timestamp } from '@google-cloud/firestore';
 import { Router, type IRouter, type Response } from 'express';
 import { z } from 'zod';
 import { getFirestore, COLLECTIONS } from '../../db/firestore.js';
@@ -9,6 +10,7 @@ import { generateDraftEdit, isValidProvider, type LlmProvider, DEFAULT_PROVIDER 
 import { replaceGcsUrlsWithMediaProxy } from '../../lib/mediaUrls.js';
 import { getSundayOfWeekKey, getWeekKey } from '../../lib/weekKey.js';
 import { getApiBaseUrl } from '../../config.js';
+import { loadFormattedMemoContextForDraft } from '../../lib/draftMemoContext.js';
 
 const router: IRouter = Router();
 
@@ -16,6 +18,8 @@ const updateSchema = z.object({
   subject: z.string().optional(),
   bodyMarkdown: z.string().optional(),
   bodyHtml: z.string().optional(),
+  /** Optional display label in the admin draft list (empty string clears to date fallback). */
+  name: z.string().max(200).optional(),
 });
 
 const chatSchema = z.object({
@@ -59,7 +63,7 @@ router.post('/generate', (req: AuthRequest, res: Response) => {
 
 function draftToJson(id: string, data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { id, ...data };
-  ['generatedAt', 'approvedAt', 'sentAt'].forEach((k) => {
+  ['generatedAt', 'approvedAt', 'sentAt', 'memoRangeStart', 'memoRangeEnd'].forEach((k) => {
     const v = data[k];
     if (v && typeof (v as { toDate?: () => Date }).toDate === 'function') {
       out[k] = (v as { toDate: () => Date }).toDate().toISOString();
@@ -82,6 +86,47 @@ function draftToJson(id: string, data: Record<string, unknown>): Record<string, 
     }
   }
   return out;
+}
+
+/** List payload: no body fields (avoid large responses). */
+function draftSummaryToJson(id: string, data: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    id,
+    weekKey: data.weekKey,
+    status: data.status,
+    subject: data.subject ?? '',
+    name: typeof data.name === 'string' ? data.name : '',
+  };
+  ['generatedAt', 'approvedAt', 'sentAt', 'memoRangeStart', 'memoRangeEnd'].forEach((k) => {
+    const v = data[k];
+    if (v && typeof (v as { toDate?: () => Date }).toDate === 'function') {
+      out[k] = (v as { toDate: () => Date }).toDate().toISOString();
+    }
+  });
+  const weekKey = data.weekKey as string | undefined;
+  if (weekKey) {
+    const sendDate = getSundayOfWeekKey(weekKey);
+    if (sendDate) {
+      out.plannedSendAt = sendDate.toISOString();
+      out.plannedSendLabel = sendDate.toLocaleString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+  }
+  return out;
+}
+
+const WEEK_KEY_RE = /^(\d{4})-W(\d{2})$/;
+
+function parseWeekKeyQuery(raw: unknown): string {
+  if (typeof raw === 'string' && WEEK_KEY_RE.test(raw)) return raw;
+  return getWeekKey(new Date());
 }
 
 /**
@@ -123,6 +168,73 @@ router.get('/current', async (_req: AuthRequest, res: Response) => {
   } catch (err) {
     logger.error('GET /admin/drafts/current', err);
     res.status(500).json({ error: 'Failed to get draft' });
+  }
+});
+
+/**
+ * All drafts for an ISO week (default: current week), newest first.
+ * Use this to switch between generated versions without losing older drafts.
+ */
+router.get('/for-week', async (req: AuthRequest, res: Response) => {
+  const db = getFirestore();
+  const coll = db.collection(COLLECTIONS.DRAFTS);
+  const weekKey = parseWeekKeyQuery(req.query.weekKey);
+
+  try {
+    const summaries: Record<string, unknown>[] = [];
+    try {
+      const snap = await coll.where('weekKey', '==', weekKey).orderBy('generatedAt', 'desc').limit(50).get();
+      for (const d of snap.docs) {
+        summaries.push(draftSummaryToJson(d.id, d.data() ?? {}));
+      }
+    } catch (_queryErr) {
+      logger.warn(
+        'GET /admin/drafts/for-week indexed query failed (add composite index on weekKey, generatedAt), using fallback',
+      );
+      const snap = await coll.orderBy('generatedAt', 'desc').limit(100).get();
+      for (const d of snap.docs) {
+        if ((d.data()?.weekKey as string) === weekKey) {
+          summaries.push(draftSummaryToJson(d.id, d.data() ?? {}));
+        }
+      }
+    }
+    res.json({ weekKey, drafts: summaries });
+  } catch (err) {
+    logger.error('GET /admin/drafts/for-week', err);
+    res.status(500).json({ error: 'Failed to list drafts' });
+  }
+});
+
+const DRAFT_LIST_LOOKBACK_MS = 28 * 24 * 60 * 60 * 1000;
+
+/** Recent drafts only (generated in the last 4 weeks), newest first. */
+router.get('/', async (_req: AuthRequest, res: Response) => {
+  try {
+    const coll = getFirestore().collection(COLLECTIONS.DRAFTS);
+    const cutoff = new Date(Date.now() - DRAFT_LIST_LOOKBACK_MS);
+    let summaries: Record<string, unknown>[] = [];
+    try {
+      const snap = await coll
+        .where('generatedAt', '>=', Timestamp.fromDate(cutoff))
+        .orderBy('generatedAt', 'desc')
+        .limit(100)
+        .get();
+      summaries = snap.docs.map((d) => draftSummaryToJson(d.id, d.data() ?? {}));
+    } catch (_err) {
+      logger.warn('GET /admin/drafts filtered query failed, using fallback (orderBy + in-memory filter)');
+      const snap = await coll.orderBy('generatedAt', 'desc').limit(200).get();
+      for (const d of snap.docs) {
+        const ga = d.data()?.generatedAt as { toDate?: () => Date } | undefined;
+        const t = ga?.toDate?.();
+        if (t && t.getTime() >= cutoff.getTime()) {
+          summaries.push(draftSummaryToJson(d.id, d.data() ?? {}));
+        }
+      }
+    }
+    res.json({ drafts: summaries });
+  } catch (err) {
+    logger.error('GET /admin/drafts', err);
+    res.status(500).json({ error: 'Failed to list drafts' });
   }
 });
 
@@ -233,12 +345,21 @@ router.patch('/:id', async (req: AuthRequest, res: Response) => {
       return;
     }
     const data = snap.data()!;
+    const { subject, bodyMarkdown, bodyHtml, name } = parsed.data;
+    const updates: Record<string, unknown> = {};
+    if (subject !== undefined) updates.subject = subject;
+    if (bodyMarkdown !== undefined) updates.bodyMarkdown = bodyMarkdown;
+    if (bodyHtml !== undefined) updates.bodyHtml = bodyHtml;
+    if (name !== undefined) updates.name = name;
+    const keys = Object.keys(updates);
     if (data.status === 'sent') {
-      res.status(400).json({ error: 'Draft already sent' });
-      return;
+      const disallowed = keys.filter((k) => k !== 'name');
+      if (disallowed.length > 0) {
+        res.status(400).json({ error: 'Sent drafts can only be renamed' });
+        return;
+      }
     }
-    const updates: Record<string, unknown> = { ...parsed.data };
-    if (Object.keys(updates).length > 0) {
+    if (keys.length > 0) {
       await ref.update(updates);
     }
     const updated = await ref.get();
@@ -316,6 +437,47 @@ router.post('/:id/unapprove', async (req: AuthRequest, res: Response) => {
   }
 });
 
+/** Create a new draft with the same content as this one (new id, generatedAt now, pending approval). */
+router.post('/:id/duplicate', async (req: AuthRequest, res: Response) => {
+  try {
+    const db = getFirestore();
+    const srcRef = db.collection(COLLECTIONS.DRAFTS).doc(req.params.id);
+    const snap = await srcRef.get();
+    if (!snap.exists) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    const src = snap.data()!;
+    const now = new Date();
+    const weekKey = getWeekKey(now);
+    const srcName = typeof src.name === 'string' ? src.name.trim() : '';
+    const dupName = srcName
+      ? `${srcName} (copy)`
+      : now.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+    const newRef = await db.collection(COLLECTIONS.DRAFTS).add({
+      weekKey,
+      status: 'pending_approval',
+      generatedAt: now,
+      approvedAt: null,
+      sentAt: null,
+      name: dupName,
+      subject: src.subject ?? '',
+      bodyMarkdown: src.bodyMarkdown ?? '',
+      bodyHtml: src.bodyHtml ?? null,
+      memoIds: src.memoIds ?? [],
+      contextNewsletterIds: src.contextNewsletterIds ?? [],
+      usedPromptVersionId: src.usedPromptVersionId ?? null,
+      memoRangeStart: src.memoRangeStart ?? null,
+      memoRangeEnd: src.memoRangeEnd ?? null,
+    });
+    const created = await newRef.get();
+    res.json({ ok: true, draftId: newRef.id, draft: draftToJson(newRef.id, created.data() ?? {}) });
+  } catch (err) {
+    logger.error('POST /admin/drafts/:id/duplicate', err);
+    res.status(500).json({ error: 'Failed to duplicate draft' });
+  }
+});
+
 /** Chat with agent to edit the draft. Updates draft with revised subject/body and returns them. */
 router.post('/:id/chat', async (req: AuthRequest, res: Response) => {
   try {
@@ -338,11 +500,13 @@ router.post('/:id/chat', async (req: AuthRequest, res: Response) => {
     const currentSubject = data.subject ?? 'Weekly Update';
     const currentBody = data.bodyMarkdown ?? '';
     const chatProvider: LlmProvider = parsed.data.provider ?? DEFAULT_PROVIDER;
+    const sourceMemosFormatted = await loadFormattedMemoContextForDraft(data as Record<string, unknown>);
     const result = await generateDraftEdit(
       {
         currentSubject,
         currentBodyMarkdown: currentBody,
         userMessage: parsed.data.message,
+        sourceMemosFormatted,
       },
       chatProvider,
     );
@@ -380,6 +544,27 @@ router.post('/:id/send-now', async (req: AuthRequest, res: Response) => {
       error: 'Send failed',
       details: toErrorMessage(err),
     });
+  }
+});
+
+/** Permanently remove a draft. Sent newsletters cannot be deleted. */
+router.delete('/:id', async (req: AuthRequest, res: Response) => {
+  try {
+    const ref = getFirestore().collection(COLLECTIONS.DRAFTS).doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    if (snap.data()?.status === 'sent') {
+      res.status(400).json({ error: 'Cannot delete a draft that has already been sent' });
+      return;
+    }
+    await ref.delete();
+    res.status(204).send();
+  } catch (err) {
+    logger.error('DELETE /admin/drafts/:id', err);
+    res.status(500).json({ error: 'Failed to delete draft' });
   }
 });
 

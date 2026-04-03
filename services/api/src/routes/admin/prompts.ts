@@ -5,10 +5,11 @@ import { getFirestore, COLLECTIONS } from '../../db/firestore.js';
 import { AuthRequest } from '../../middleware/auth.js';
 import { logger, toErrorMessage } from '../../lib/logger.js';
 import { getPlaceholders, renderUserPrompt } from '../../lib/promptTemplate.js';
-import { DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT_TEMPLATE } from '../../lib/defaultPrompt.js';
+import { DEFAULT_USER_PROMPT_TEMPLATE } from '../../lib/defaultPrompt.js';
 import { markdownBoldToHtml } from '../../lib/emailFormat.js';
 import { FAKE_MEMOS_JSON, FAKE_NEWSLETTERS_JSON } from '../../lib/promptTestFixtures.js';
 import { generateNewsletterDraft, isValidProvider, type LlmProvider, DEFAULT_PROVIDER } from '../../llm/index.js';
+import { getLatestPromptVersionDoc } from '../../lib/getLatestPromptVersion.js';
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -27,35 +28,31 @@ async function deactivateActivePromptsInBatch(db: Firestore, batch: WriteBatch):
   activeSnap.docs.forEach((d) => batch.update(d.ref, { isActive: false }));
 }
 
-router.get('/active', async (_req: AuthRequest, res: Response) => {
+/** Newest saved prompt (by createdAt when present). Falls back to scanning docs if orderBy misses legacy rows. */
+router.get('/latest', async (_req: AuthRequest, res: Response) => {
   try {
-    const snap = await getFirestore()
-      .collection(COLLECTIONS.PROMPT_VERSIONS)
-      .where('isActive', '==', true)
-      .limit(1)
-      .get();
-    if (snap.empty) {
-      res.json({
-        systemPrompt: DEFAULT_SYSTEM_PROMPT,
-        userPromptTemplate: DEFAULT_USER_PROMPT_TEMPLATE,
-        id: null,
-        isDefault: true,
-      });
+    const coll = getFirestore().collection(COLLECTIONS.PROMPT_VERSIONS);
+    const chosen = await getLatestPromptVersionDoc(
+      async () => (await coll.orderBy('createdAt', 'desc').limit(1).get()).docs,
+      async () => (await coll.limit(200).get()).docs,
+    );
+
+    if (!chosen) {
+      res.status(404).json({ error: 'No prompt versions yet' });
       return;
     }
-    const doc = snap.docs[0];
-    const data = doc.data();
+
+    const data = chosen.data();
     res.json({
-      id: doc.id,
+      id: chosen.id,
       systemPrompt: data.systemPrompt,
       userPromptTemplate: data.userPromptTemplate,
       notes: data.notes,
       createdAt: data.createdAt?.toDate?.()?.toISOString?.(),
-      isDefault: false,
     });
   } catch (err) {
-    logger.error('GET /admin/prompts/active', err);
-    res.status(500).json({ error: 'Failed to get active prompt' });
+    logger.error('GET /admin/prompts/latest', err);
+    res.status(500).json({ error: 'Failed to get latest prompt' });
   }
 });
 
@@ -130,30 +127,6 @@ router.post('/:id/activate', async (req: AuthRequest, res: Response) => {
   } catch (err) {
     logger.error('POST /admin/prompts/:id/activate', err);
     res.status(500).json({ error: 'Failed to activate prompt' });
-  }
-});
-
-router.post('/reset-default', async (req: AuthRequest, res: Response) => {
-  try {
-    const uid = req.uid!;
-    const db = getFirestore();
-    const batch = db.batch();
-    await deactivateActivePromptsInBatch(db, batch);
-    const newRef = db.collection(COLLECTIONS.PROMPT_VERSIONS).doc();
-    batch.set(newRef, {
-      systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      userPromptTemplate: DEFAULT_USER_PROMPT_TEMPLATE,
-      notes: 'Default prompt (reset)',
-      isActive: true,
-      createdAt: new Date(),
-      createdByUid: uid,
-    });
-    await batch.commit();
-    const created = await newRef.get();
-    res.status(201).json({ id: created.id, ...created.data() });
-  } catch (err) {
-    logger.error('POST /admin/prompts/reset-default', err);
-    res.status(500).json({ error: 'Failed to reset prompt' });
   }
 });
 

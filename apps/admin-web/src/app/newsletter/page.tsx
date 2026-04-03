@@ -1,21 +1,140 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import AdminLayout from '@/components/AdminLayout';
 import { getAuth } from '@/lib/firebase';
-import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
 
 const MANUAL_SEND_PHRASE = 'I solemnly swear I am up to no good';
+
+function formatDraftOptionLabel(d: Pick<DraftSummary, 'generatedAt' | 'name'>): string {
+  const label = d.name?.trim();
+  if (label) return label;
+  return d.generatedAt
+    ? new Date(d.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Draft';
+}
+
+function formatMemoRangeDate(iso?: string): string {
+  if (!iso) return '…';
+  const x = new Date(iso);
+  return Number.isNaN(x.getTime())
+    ? iso.slice(0, 10)
+    : x.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function DraftMemoRangeBlurb({ draft }: { draft: Draft }) {
+  if (draft.memoRangeStart || draft.memoRangeEnd) {
+    return (
+      <p className="pl-0.5 text-xs text-slate-600">
+        Memos in this draft:{' '}
+        <span className="font-bold text-slate-900">
+          {formatMemoRangeDate(draft.memoRangeStart)} – {formatMemoRangeDate(draft.memoRangeEnd)}
+        </span>
+      </p>
+    );
+  }
+  return (
+    <p className="pl-0.5 text-xs text-slate-600">
+      Memos in this draft:{' '}
+      <span className="font-bold text-slate-900">range not stored</span>
+      <span className="text-slate-500"> (saved before this was tracked)</span>
+    </p>
+  );
+}
+
+function BouncingDots({ className }: { className?: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 ${className ?? ''}`} aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="inline-block h-2 w-2 rounded-full bg-violet-500 motion-safe:animate-bounce"
+          style={{ animationDelay: `${i * 140}ms`, animationDuration: '0.55s' }}
+        />
+      ))}
+    </span>
+  );
+}
+
+function DraftWorkingGlyph({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
+  const box = size === 'lg' ? 'h-16 w-16' : size === 'sm' ? 'h-9 w-9' : 'h-12 w-12';
+  const icon = size === 'lg' ? 'h-8 w-8' : size === 'sm' ? 'h-4 w-4' : 'h-6 w-6';
+  return (
+    <div className={`relative shrink-0 ${box}`}>
+      <span className="absolute inset-0 rounded-full bg-violet-400/30 motion-safe:animate-ping" />
+      <span className="absolute inset-1 rounded-full bg-gradient-to-br from-violet-200 to-amber-100 motion-safe:animate-pulse" />
+      <span className="relative flex h-full w-full items-center justify-center rounded-full border-2 border-violet-300/80 bg-white shadow-sm">
+        <svg
+          className={`${icon} text-violet-600 motion-safe:animate-pulse`}
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth={1.5}
+          stroke="currentColor"
+          aria-hidden
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.847a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"
+          />
+        </svg>
+      </span>
+    </div>
+  );
+}
+
+/** Page-level status while a draft is being generated or the bottom agent is editing. */
+function NewsletterWorkingBanner({ mode }: { mode: 'generating' | 'agent' }) {
+  const isGen = mode === 'generating';
+  return (
+    <div
+      className="mb-4 flex items-center gap-4 rounded-xl border border-violet-200/90 bg-gradient-to-r from-violet-50 via-white to-amber-50 px-4 py-3 shadow-sm"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <DraftWorkingGlyph size="md" />
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-center gap-2 font-medium text-slate-800">
+          {isGen ? 'Generating a new draft' : 'Agent is revising this draft'}
+          <BouncingDots className="translate-y-0.5" />
+        </p>
+        <p className="text-xs text-slate-600 mt-0.5">
+          {isGen
+            ? 'Pulling memos and writing the newsletter—this can take a minute.'
+            : 'Updating subject and body from your request and the memo transcripts.'}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 type Draft = {
   id: string;
   weekKey: string;
   status: string;
+  /** Admin-only label for the draft picker; falls back to generated date if empty. */
+  name?: string;
   subject: string;
   bodyMarkdown: string;
   bodyHtml?: string;
   generatedAt: string;
+  memoRangeStart?: string;
+  memoRangeEnd?: string;
   plannedSendAt?: string;
+  plannedSendLabel?: string;
+};
+
+type DraftSummary = {
+  id: string;
+  weekKey: string;
+  status: string;
+  name?: string;
+  subject: string;
+  generatedAt: string;
+  memoRangeStart?: string;
+  memoRangeEnd?: string;
   plannedSendLabel?: string;
 };
 
@@ -45,8 +164,8 @@ export default function NewsletterPage() {
   const [sendNowPhrase, setSendNowPhrase] = useState('');
   const [sendNowLoading, setSendNowLoading] = useState(false);
   const [authReady, setAuthReady] = useState(false);
-  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
-  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('claude');
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [llmProvider, setLlmProvider] = useState<'claude' | 'grok'>('grok');
   const [generateStartDate, setGenerateStartDate] = useState<string>(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
@@ -58,6 +177,15 @@ export default function NewsletterPage() {
   const [mediaCandidates, setMediaCandidates] = useState<MediaCandidate[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [selectedEditorMediaUrl, setSelectedEditorMediaUrl] = useState<string>('');
+  const [draftList, setDraftList] = useState<DraftSummary[]>([]);
+  const [draftListLoading, setDraftListLoading] = useState(false);
+  const [openingDraftId, setOpeningDraftId] = useState<string | null>(null);
+  const [deletingDraft, setDeletingDraft] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const [draftNameEdit, setDraftNameEdit] = useState('');
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameModalValue, setRenameModalValue] = useState('');
+  const [savingRename, setSavingRename] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const selectionRangeRef = useRef<Range | null>(null);
 
@@ -68,24 +196,154 @@ export default function NewsletterPage() {
     return bodyMarkdown;
   }, [editMode, bodyMarkdown]);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    apiGet<Draft>('/admin/drafts/current')
-      .then((d) => {
-        setDraft(d);
-        setSubject(d.subject ?? '');
-        setBodyMarkdown(d.bodyMarkdown ?? '');
-        setPreviewBodyMarkdown(null);
-      })
-      .catch((err) => {
-        setDraft(null);
-        setPreviewBodyMarkdown(null);
-        if (err?.message?.includes('Authorization') || err?.message?.includes('401')) {
-          setMessage('Sign-in problem. Try signing out and back in.');
-        }
-      })
-      .finally(() => setLoading(false));
+  const loadDraftList = useCallback(async () => {
+    setDraftListLoading(true);
+    try {
+      const r = await apiGet<{ drafts: DraftSummary[] }>('/admin/drafts');
+      setDraftList(r.drafts ?? []);
+    } catch {
+      setDraftList([]);
+    } finally {
+      setDraftListLoading(false);
+    }
   }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      let list: DraftSummary[] = [];
+      try {
+        const r = await apiGet<{ drafts: DraftSummary[] }>('/admin/drafts');
+        list = r.drafts ?? [];
+      } catch {
+        list = [];
+      }
+      setDraftList(list);
+
+      let opened: Draft | null = null;
+      try {
+        opened = await apiGet<Draft>('/admin/drafts/current');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('Authorization') || msg.includes('401')) {
+          setMessage('Sign-in problem. Try signing out and back in.');
+          return;
+        }
+      }
+
+      if (!opened && list.length > 0) {
+        try {
+          opened = await apiGet<Draft>(`/admin/drafts/${list[0].id}`);
+        } catch {
+          opened = null;
+        }
+      }
+
+      if (opened) {
+        setDraft(opened);
+        setSubject(opened.subject ?? '');
+        setBodyMarkdown(opened.bodyMarkdown ?? '');
+        setPreviewBodyMarkdown(null);
+      } else {
+        setDraft(null);
+        setSubject('');
+        setBodyMarkdown('');
+        setPreviewBodyMarkdown(null);
+      }
+    } catch (e) {
+      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const openDraftById = useCallback(async (id: string) => {
+    if (!id) return;
+    setOpeningDraftId(id);
+    setMessage(null);
+    try {
+      const d = await apiGet<Draft>(`/admin/drafts/${id}`);
+      setDraft(d);
+      setSubject(d.subject ?? '');
+      setBodyMarkdown(d.bodyMarkdown ?? '');
+      setPreviewBodyMarkdown(null);
+    } catch (e) {
+      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setOpeningDraftId(null);
+    }
+  }, []);
+
+  const deleteOpenDraft = useCallback(async () => {
+    if (!draft || draft.status === 'sent') return;
+    if (!window.confirm('Delete this draft permanently? This cannot be undone.')) return;
+    setDeletingDraft(true);
+    setMessage(null);
+    try {
+      await apiDelete(`/admin/drafts/${draft.id}`);
+      setMessage('Draft deleted.');
+      await load();
+    } catch (e) {
+      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDeletingDraft(false);
+    }
+  }, [draft, load]);
+
+  const duplicateOpenDraft = useCallback(async () => {
+    if (!draft) return;
+    setDuplicating(true);
+    setMessage(null);
+    try {
+      if (draft.status !== 'sent') {
+        const currentBody = getBodyMarkdown();
+        await apiPatch(`/admin/drafts/${draft.id}`, {
+          subject,
+          bodyMarkdown: currentBody,
+          name: draftNameEdit.trim(),
+        });
+      }
+      const result = (await apiPost(`/admin/drafts/${draft.id}/duplicate`)) as { draftId?: string };
+      const newId = result?.draftId;
+      if (!newId) throw new Error('Duplicate did not return a draft id');
+      const d = await apiGet<Draft>(`/admin/drafts/${newId}`);
+      setDraft(d);
+      setSubject(d.subject ?? '');
+      setBodyMarkdown(d.bodyMarkdown ?? '');
+      setPreviewBodyMarkdown(null);
+      setEditorVersion((v) => v + 1);
+      await loadDraftList();
+      setMessage(
+        draft.status === 'sent'
+          ? 'Duplicated from the saved sent version. You are now editing the new copy.'
+          : 'Draft duplicated (your latest edits were saved into the copy). You are now editing the new copy.',
+      );
+    } catch (e) {
+      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDuplicating(false);
+    }
+  }, [draft, draftNameEdit, getBodyMarkdown, subject, loadDraftList]);
+
+  /** Server list is last 4 weeks only; include open draft if older so the select stays valid. */
+  const draftListForSelect = useMemo((): DraftSummary[] => {
+    const base = draftList.slice();
+    if (draft && !base.some((x) => x.id === draft.id)) {
+      base.push({
+        id: draft.id,
+        weekKey: draft.weekKey,
+        status: draft.status,
+        name: draft.name,
+        subject: draft.subject,
+        generatedAt: draft.generatedAt,
+        memoRangeStart: draft.memoRangeStart,
+        memoRangeEnd: draft.memoRangeEnd,
+      });
+    }
+    base.sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
+    return base;
+  }, [draft, draftList]);
 
   const loadPreviewBody = (draftId: string) => {
     apiGet<{ bodyMarkdown: string }>(`/admin/drafts/${draftId}/preview-body`)
@@ -114,18 +372,42 @@ export default function NewsletterPage() {
 
   useEffect(() => {
     if (!authReady) return;
-    load();
+    void load();
   }, [authReady, load]);
 
   useEffect(() => {
     if (draft) {
       setSubject(draft.subject ?? '');
       setBodyMarkdown(draft.bodyMarkdown ?? '');
+      setDraftNameEdit(draft.name ?? '');
       loadPreviewBody(draft.id);
       loadMediaCandidates(draft.id);
       setEditorVersion(v => v + 1);
     }
   }, [draft?.id]);
+
+  const saveRenameFromModal = useCallback(async () => {
+    if (!draft) return;
+    const next = renameModalValue.trim();
+    const prev = (draft.name ?? '').trim();
+    if (next === prev) {
+      setShowRenameModal(false);
+      return;
+    }
+    setSavingRename(true);
+    setMessage(null);
+    try {
+      const updated = (await apiPatch(`/admin/drafts/${draft.id}`, { name: next })) as Draft;
+      setDraft(updated);
+      setDraftNameEdit(updated.name ?? '');
+      await loadDraftList();
+      setShowRenameModal(false);
+    } catch (e) {
+      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSavingRename(false);
+    }
+  }, [draft, renameModalValue, loadDraftList]);
 
   /**
    * Make newsletter media more subtle in the editor/preview:
@@ -594,10 +876,12 @@ export default function NewsletterPage() {
         load();
         setMessage('Draft generated. Review and edit below.');
       }
+      await loadDraftList();
     } catch (e) {
       setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setGenerating(false);
+      setShowGenerateModal(false);
     }
   };
 
@@ -607,54 +891,25 @@ export default function NewsletterPage() {
     setMessage(null);
     try {
       const currentBody = getBodyMarkdown();
-      await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
+      if (draft.status === 'sent') {
+        await apiPatch(`/admin/drafts/${draft.id}`, { name: draftNameEdit.trim() });
+      } else {
+        await apiPatch(`/admin/drafts/${draft.id}`, {
+          subject,
+          bodyMarkdown: currentBody,
+          name: draftNameEdit.trim(),
+        });
+      }
       setMessage('Saved.');
       const updated = await apiGet<Draft>(`/admin/drafts/${draft.id}`);
       setDraft(updated);
       setSubject(updated.subject ?? '');
       setBodyMarkdown(updated.bodyMarkdown ?? '');
+      setDraftNameEdit(updated.name ?? '');
       setPreviewBodyMarkdown(null);
       loadPreviewBody(updated.id);
       setEditorVersion(v => v + 1);
-    } catch (e) {
-      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const approve = async () => {
-    if (!draft) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      const currentBody = getBodyMarkdown();
-      await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
-      await apiPost(`/admin/drafts/${draft.id}/approve`);
-      setMessage('Marked as ready to send.');
-      const updated = await apiGet<Draft>(`/admin/drafts/${draft.id}`);
-      setDraft(updated);
-      setSubject(updated.subject ?? '');
-      setBodyMarkdown(updated.bodyMarkdown ?? '');
-      setEditorVersion(v => v + 1);
-    } catch (e) {
-      setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const unapprove = async () => {
-    if (!draft) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      await apiPost(`/admin/drafts/${draft.id}/unapprove`);
-      setMessage('Draft set back to pending.');
-      const updated = await apiGet<Draft>(`/admin/drafts/${draft.id}`);
-      setDraft(updated);
-      setSubject(updated.subject ?? '');
-      setBodyMarkdown(updated.bodyMarkdown ?? '');
+      await loadDraftList();
     } catch (e) {
       setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -668,7 +923,11 @@ export default function NewsletterPage() {
     setMessage(null);
     try {
       const currentBody = getBodyMarkdown();
-      await apiPatch(`/admin/drafts/${draft.id}`, { subject, bodyMarkdown: currentBody });
+      await apiPatch(`/admin/drafts/${draft.id}`, {
+        subject,
+        bodyMarkdown: currentBody,
+        name: draftNameEdit.trim(),
+      });
       const result = await apiPost(`/admin/drafts/${draft.id}/chat`, {
         message: chatMessage.trim(),
         provider: llmProvider,
@@ -678,6 +937,7 @@ export default function NewsletterPage() {
       setEditorVersion(v => v + 1);
       setChatMessage('');
       setMessage('Draft updated. You can edit further or ask again.');
+      await loadDraftList();
     } catch (e) {
       setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -707,6 +967,8 @@ export default function NewsletterPage() {
       setDraft(updated);
       setSubject(updated.subject ?? '');
       setBodyMarkdown(updated.bodyMarkdown ?? '');
+      setDraftNameEdit(updated.name ?? '');
+      await loadDraftList();
     } catch (e) {
       setMessage('Error: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -725,25 +987,44 @@ export default function NewsletterPage() {
   return (
     <AdminLayout>
       <div className="w-full max-w-none">
-        <h1 className="text-2xl font-semibold mb-2">Newsletter Draft</h1>
-        <p className="text-slate-600 mb-4">
-          Generate a draft from your memos, edit it (by hand or with the agent), then send when ready.
-        </p>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 gap-y-2">
+          <h1 className="text-2xl font-semibold">Newsletter</h1>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowGenerateModal(true)}
+              disabled={generating}
+              className="rounded-md bg-slate-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {generating ? 'Generating…' : 'Generate'}
+            </button>
+            {draft ? (
+              <>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={saving || chatLoading}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                {draft.status !== 'sent' ? (
+                  <button
+                    type="button"
+                    onClick={openSendNow}
+                    className="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
+                  >
+                    Send
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </div>
 
         <div className="flex items-center gap-3 mb-4">
           <span className="text-sm font-medium text-slate-700">AI model:</span>
           <div className="flex bg-slate-100 rounded-lg p-0.5">
-            <button
-              type="button"
-              onClick={() => setLlmProvider('claude')}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                llmProvider === 'claude'
-                  ? 'bg-white shadow-sm text-slate-800 font-medium'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Claude
-            </button>
             <button
               type="button"
               onClick={() => setLlmProvider('grok')}
@@ -755,130 +1036,142 @@ export default function NewsletterPage() {
             >
               Grok
             </button>
+            <button
+              type="button"
+              onClick={() => setLlmProvider('claude')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                llmProvider === 'claude'
+                  ? 'bg-white shadow-sm text-slate-800 font-medium'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Claude
+            </button>
           </div>
         </div>
 
+        {(generating || chatLoading) && (
+          <NewsletterWorkingBanner mode={chatLoading ? 'agent' : 'generating'} />
+        )}
+
+        {draftListForSelect.length > 0 && (
+          <div className="mb-5 flex flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                id="draft-list-select"
+                aria-label="Choose draft"
+                value={draft?.id ?? ''}
+                disabled={
+                  !!openingDraftId ||
+                  draftListLoading ||
+                  duplicating ||
+                  savingRename ||
+                  chatLoading ||
+                  generating
+                }
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (id && id !== draft?.id) void openDraftById(id);
+                }}
+                className="min-w-[12rem] flex-1 max-w-md rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm disabled:opacity-50"
+              >
+                {!draft ? (
+                  <option value="" disabled>
+                    Select draft…
+                  </option>
+                ) : null}
+                {draftListForSelect.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {formatDraftOptionLabel(d)}
+                  </option>
+                ))}
+              </select>
+              {openingDraftId ? <span className="text-xs text-slate-500">Opening…</span> : null}
+              {draft ? (
+                <button
+                  type="button"
+                  onClick={() => void duplicateOpenDraft()}
+                  disabled={
+                    duplicating ||
+                    !!openingDraftId ||
+                    deletingDraft ||
+                    savingRename ||
+                    chatLoading ||
+                    generating
+                  }
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {duplicating ? 'Duplicating…' : 'Duplicate'}
+                </button>
+              ) : null}
+              {draft ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenameModalValue(draft.name ?? '');
+                    setShowRenameModal(true);
+                  }}
+                  disabled={
+                    !!openingDraftId || duplicating || deletingDraft || savingRename || chatLoading || generating
+                  }
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Rename
+                </button>
+              ) : null}
+              {draft && draft.status !== 'sent' ? (
+                <button
+                  type="button"
+                  onClick={() => void deleteOpenDraft()}
+                  disabled={
+                    deletingDraft || !!openingDraftId || savingRename || chatLoading || generating
+                  }
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  {deletingDraft ? 'Deleting…' : 'Delete'}
+                </button>
+              ) : null}
+            </div>
+            {draft ? <DraftMemoRangeBlurb draft={draft} /> : null}
+          </div>
+        )}
+
         {!draft ? (
           <div className="border border-slate-200 rounded-lg p-6 bg-slate-50">
-            <p className="text-slate-700 mb-4">
-              No draft yet. Generate one from your memos. Adjust the date range to include any memos you want.
-            </p>
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-slate-700 whitespace-nowrap">From</label>
-                <input
-                  type="date"
-                  value={generateStartDate}
-                  onChange={(e) => setGenerateStartDate(e.target.value)}
-                  className="border rounded-lg px-2 py-1 text-sm"
-                />
+            {generating ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-8 text-center" role="status" aria-live="polite">
+                <DraftWorkingGlyph size="lg" />
+                <div>
+                  <p className="font-medium text-slate-800 flex items-center justify-center gap-2 flex-wrap">
+                    Generating your draft
+                    <BouncingDots />
+                  </p>
+                  <p className="text-sm text-slate-600 mt-2 max-w-md mx-auto">
+                    Memos are being read and turned into this week&apos;s newsletter. You&apos;ll see it here when
+                    it&apos;s ready.
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-slate-700 whitespace-nowrap">To</label>
-                <input
-                  type="date"
-                  value={generateEndDate}
-                  onChange={(e) => setGenerateEndDate(e.target.value)}
-                  className="border rounded-lg px-2 py-1 text-sm"
-                />
-              </div>
-            </div>
-            <button
-              onClick={generateDraft}
-              disabled={generating}
-              className="px-4 py-2 bg-slate-700 text-white rounded-lg disabled:opacity-50"
-            >
-              {generating ? 'Generating…' : 'Generate newsletter from memos'}
-            </button>
-            {message && <p className="text-sm text-slate-600 mt-2">{message}</p>}
+            ) : (
+              <>
+                <p className="text-slate-700">
+                  {draftListForSelect.length > 0
+                    ? 'Select a draft above, or use Generate (top right) to create one from your memos.'
+                    : 'No drafts in the last four weeks. Use Generate (top right) to create one from your memos.'}
+                </p>
+                {message && <p className="text-sm text-slate-600 mt-3">{message}</p>}
+              </>
+            )}
           </div>
         ) : (
           <>
-            {draft.status === 'approved' ? (
-              <div className="mb-4 rounded-lg border-2 border-green-600 bg-green-50 px-4 py-3">
-                <p className="text-base font-semibold text-green-800">
-                  ✓ Ready to send
-                </p>
-                <p className="mt-0.5 text-sm text-green-700">
-                  Generated: {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : '—'}
-                </p>
-              </div>
-            ) : draft.status === 'sent' ? (
-              <div className="mb-4 rounded-lg border-2 border-slate-400 bg-slate-100 px-4 py-3">
-                <p className="text-base font-semibold text-slate-800">Already sent</p>
-                <p className="mt-1 text-sm text-slate-600">
-                  Week: {draft.weekKey} · Generated: {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : '—'}
-                </p>
-              </div>
-            ) : (
-              <div className="mb-4 rounded-lg border-2 border-amber-500 bg-amber-50 px-4 py-3">
-                <p className="text-base font-semibold text-amber-900">
-                  Draft pending — review and send when ready.
-                </p>
-                <p className="mt-0.5 text-sm text-amber-800">
-                  Generated: {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : '—'}
-                </p>
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3 mb-3">
-              <span className="text-sm font-medium text-slate-700">Memo date range:</span>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-slate-600 whitespace-nowrap">From</label>
-                <input
-                  type="date"
-                  value={generateStartDate}
-                  onChange={(e) => setGenerateStartDate(e.target.value)}
-                  className="border rounded-lg px-2 py-1 text-sm"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-slate-600 whitespace-nowrap">To</label>
-                <input
-                  type="date"
-                  value={generateEndDate}
-                  onChange={(e) => setGenerateEndDate(e.target.value)}
-                  className="border rounded-lg px-2 py-1 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2 mb-4">
-              <button
-                onClick={() => setShowGenerateConfirm(true)}
-                disabled={generating}
-                className="px-4 py-2 bg-slate-600 text-white rounded-lg disabled:opacity-50"
-              >
-                {generating ? 'Generating…' : 'Generate new draft'}
-              </button>
-              <button
-                onClick={save}
-                disabled={saving}
-                className="px-4 py-2 bg-slate-600 text-white rounded-lg disabled:opacity-50"
-              >
-                Save edits
-              </button>
-              {draft.status !== 'sent' && (
-                <button
-                  onClick={openSendNow}
-                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
-                >
-                  Send now
-                </button>
-              )}
-            </div>
             {message && <p className="text-sm text-slate-600 mb-4">{message}</p>}
 
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
+            <div className="relative">
+            <div
+              className={`grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start ${chatLoading || generating ? 'pointer-events-none select-none' : ''}`}
+            >
               <div className="space-y-4">
-                <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Subject</label>
-                <input
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  className="w-full border rounded-lg p-2"
-                />
-                </div>
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-sm font-medium text-slate-700">Body</label>
@@ -987,7 +1280,6 @@ export default function NewsletterPage() {
                     />
                     <div className="border border-slate-200 rounded-lg p-4 bg-white mt-4">
                       <h2 className="text-lg font-medium text-slate-800 mb-2">Preview</h2>
-                      <p className="text-sm text-slate-500 mb-3">Subject: {subject || '(none)'}</p>
                       <div
                         className="p-8 bg-[#fafaf8] border border-stone-300 max-h-[70vh] overflow-auto"
                         style={{
@@ -1028,8 +1320,10 @@ export default function NewsletterPage() {
                     Ask the agent to edit the draft
                   </label>
                   <p className="text-slate-600 text-sm mb-2">
-                    Describe the changes you want (e.g. “Make the tone more casual” or “Add a section
-                    about the trip”).
+                    The agent sees the full transcripts for memos linked to this draft (same set as when it
+                    was generated, or the memo date range if older). Ask it to elaborate or pull in
+                    details—it should stick to what is actually in those memos. Describe edits (e.g. “Expand
+                    the park day paragraph using the memo” or “More casual tone”).
                   </p>
                   <div className="flex gap-2">
                     <input
@@ -1108,6 +1402,39 @@ export default function NewsletterPage() {
                 )}
               </aside>
             </div>
+            {(chatLoading || generating) && (
+              <div
+                className="absolute inset-0 z-20 flex items-start justify-center pt-[min(8rem,15vh)] rounded-lg bg-white/75 backdrop-blur-[3px]"
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+              >
+                <div className="mx-4 flex max-w-sm flex-col items-center gap-4 rounded-2xl border border-violet-200 bg-white/95 px-8 py-7 text-center shadow-lg shadow-violet-200/50">
+                  <DraftWorkingGlyph size="lg" />
+                  <div>
+                    <p className="font-medium text-slate-800 flex items-center justify-center gap-2 flex-wrap">
+                      {chatLoading ? (
+                        <>
+                          Agent is editing your draft
+                          <BouncingDots />
+                        </>
+                      ) : (
+                        <>
+                          Generating a new draft
+                          <BouncingDots />
+                        </>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-2">
+                      {chatLoading
+                        ? 'Rewriting from your instructions and memo transcripts—almost there.'
+                        : 'This screen will refresh when the new draft is ready. Memos are being read and written up.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            </div>
           </>
         )}
 
@@ -1170,32 +1497,150 @@ export default function NewsletterPage() {
             </div>
           </div>
         )}
-        {showGenerateConfirm && (
+        {showGenerateModal && (
           <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={(e) => e.target === e.currentTarget && setShowGenerateConfirm(false)}
+            onClick={(e) => e.target === e.currentTarget && !generating && setShowGenerateModal(false)}
           >
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
-              <h2 className="text-lg font-semibold text-slate-800 mb-2">Generate new draft?</h2>
-              <p className="text-slate-600 mb-4">
-                This will create a new draft from your memos using the selected date range. Your current draft will still
-                exist but will no longer be shown as the current week&apos;s draft.
+            <div
+              className="relative bg-white rounded-xl shadow-xl max-w-lg w-full p-6 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-slate-800 mb-2">Generate draft from memos</h2>
+              <p className="text-slate-600 text-sm mb-4">
+                Choose which memo dates to include. A new draft will be created from memos in that range.
+              </p>
+              <div className="flex flex-wrap items-center gap-4 mb-2">
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="generate-modal-from"
+                    className="text-sm font-bold text-slate-900 whitespace-nowrap"
+                  >
+                    From
+                  </label>
+                  <input
+                    id="generate-modal-from"
+                    type="date"
+                    value={generateStartDate}
+                    onChange={(e) => setGenerateStartDate(e.target.value)}
+                    disabled={generating}
+                    className="border rounded-lg px-2 py-1.5 text-sm disabled:opacity-50"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label htmlFor="generate-modal-to" className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                    To
+                  </label>
+                  <input
+                    id="generate-modal-to"
+                    type="date"
+                    value={generateEndDate}
+                    onChange={(e) => setGenerateEndDate(e.target.value)}
+                    disabled={generating}
+                    className="border rounded-lg px-2 py-1.5 text-sm disabled:opacity-50"
+                  />
+                </div>
+              </div>
+              <p className="mb-6 text-xs text-slate-600">
+                Memos from{' '}
+                <span className="font-bold text-slate-900">
+                  {formatMemoRangeDate(`${generateStartDate}T12:00:00`)}
+                  {' – '}
+                  {formatMemoRangeDate(`${generateEndDate}T12:00:00`)}
+                </span>
               </p>
               <div className="flex gap-2 justify-end">
                 <button
-                  onClick={() => setShowGenerateConfirm(false)}
-                  className="px-4 py-2 border rounded-lg"
+                  type="button"
+                  onClick={() => setShowGenerateModal(false)}
+                  disabled={generating}
+                  className="px-4 py-2 border rounded-lg disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    setShowGenerateConfirm(false);
-                    generateDraft();
-                  }}
-                  className="px-4 py-2 bg-slate-700 text-white rounded-lg"
+                  type="button"
+                  onClick={() => void generateDraft()}
+                  disabled={generating}
+                  className="px-4 py-2 bg-slate-700 text-white rounded-lg disabled:opacity-50"
                 >
-                  Yes, generate new draft
+                  {generating ? 'Generating…' : 'Generate draft'}
+                </button>
+              </div>
+              {generating && (
+                <div
+                  className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-xl bg-white/93 backdrop-blur-[2px] px-8 py-10 text-center"
+                  role="status"
+                  aria-live="polite"
+                  aria-busy="true"
+                >
+                  <DraftWorkingGlyph size="lg" />
+                  <p className="mt-5 font-medium text-slate-800 flex flex-wrap items-center justify-center gap-2">
+                    Weaving your newsletter from memos
+                    <BouncingDots />
+                  </p>
+                  <p className="text-xs text-slate-600 mt-2 max-w-xs">
+                    The model is reading your memos and drafting—usually well under a minute.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {showRenameModal && draft && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={(e) => e.target === e.currentTarget && !savingRename && setShowRenameModal(false)}
+          >
+            <div
+              className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-slate-800 mb-2">Rename draft</h2>
+              <p className="text-slate-600 text-sm mb-4">
+                This label appears in the draft list. Leave it empty to use the generated date instead.
+              </p>
+              <label htmlFor="rename-modal-input" className="block text-sm font-medium text-slate-700 mb-1">
+                Name
+              </label>
+              <input
+                id="rename-modal-input"
+                type="text"
+                autoFocus
+                value={renameModalValue}
+                onChange={(e) => setRenameModalValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && !savingRename) setShowRenameModal(false);
+                  if (e.key === 'Enter' && !savingRename) void saveRenameFromModal();
+                }}
+                maxLength={200}
+                disabled={savingRename}
+                placeholder={
+                  draft.generatedAt
+                    ? new Date(draft.generatedAt).toLocaleString(undefined, {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })
+                    : 'Draft name'
+                }
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-6 disabled:opacity-50"
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => !savingRename && setShowRenameModal(false)}
+                  disabled={savingRename}
+                  className="px-4 py-2 border border-slate-300 rounded-lg disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveRenameFromModal()}
+                  disabled={savingRename}
+                  className="px-4 py-2 bg-slate-700 text-white rounded-lg disabled:opacity-50"
+                >
+                  {savingRename ? 'Saving…' : 'Save'}
                 </button>
               </div>
             </div>
